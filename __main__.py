@@ -9,6 +9,7 @@ import os
 from errors import ReportError
 from reporter import Reporter
 from runner import Runner
+from environments import *
 from utils import *
 
 
@@ -39,7 +40,11 @@ def parse_args() -> argparse.Namespace:
         "-i", "--iterations", type=int, default=1, help="Number of measurement iterations"
     )
     measure_parser.add_argument(
-        "-f", "--freq", type=int, default=500, help="`perf` measurement frequency in milliseconds"
+        "-f",
+        "--frequency",
+        type=int,
+        default=500,
+        help="`perf` measurement frequency in milliseconds",
     )
     measure_parser.add_argument(
         "-s",
@@ -57,6 +62,10 @@ def parse_args() -> argparse.Namespace:
     measure_parser.add_argument(
         "--stop", action="store_true", help="Stop after a failed measurement"
     )
+    measure_parser.add_argument("--prod", action="store_true", help="")
+    measure_parser.add_argument("--light", action="store_true", help="")
+    measure_parser.add_argument("--lab", action="store_true", help="")
+    measure_parser.add_argument("--workload", type=str, help="")
 
     report_parser = subparsers.add_parser(
         "report", help="Build different reports from raw measurements"
@@ -103,7 +112,20 @@ def parse_args() -> argparse.Namespace:
 def measure_command(base_dir: str, options: argparse.Namespace, yaml_paths: list[str]) -> int:
     errors = 0
 
-    runner = Runner(base_dir)
+    env = Production()
+
+    if options.lab:
+        env = Lab()
+    elif options.light:
+        env = Lightweight()
+    elif options.prod:
+        env = Production()
+    else:
+        env = Environment()
+
+    # workload here too
+
+    runner = Runner(base_dir, env)
 
     warmup_modes = []
     if options.warmup:
@@ -137,7 +159,9 @@ def measure_command(base_dir: str, options: argparse.Namespace, yaml_paths: list
             continue
 
         for mode in warmup_modes:
-            status = runner.run_benchmark(data, mode == "warmup", options.iterations)
+            status = runner.run_benchmark(
+                data, mode == "warmup", options.iterations, options.frequency
+            )
             if not status and options.stop:
                 errors += 1
                 return errors

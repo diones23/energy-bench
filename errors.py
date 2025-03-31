@@ -24,11 +24,7 @@ class ProgramCleanError(ProgramError):
     pass
 
 
-class ReportError(Exception):
-    pass
-
-
-class UnexpectedStdoutError(Exception):
+class ProgramVerificationError(Exception):
     def __init__(self, expected: str | bytes, actual: str | bytes, *args: object) -> None:
         self.expected = expected
         self.actual = actual
@@ -40,3 +36,11 @@ class UnexpectedStdoutError(Exception):
         # diff = unified_diff(lines1, lines2, fromfile="expected", tofile="actual")
         # return f"Benchmark output didn't match expected output:\n{" ".join(diff)}"
         return f"Benchmark didn't match expected stdout"
+
+
+class ReportError(Exception):
+    pass
+
+
+class EnvironmentError(Exception):
+    pass

@@ -1,9 +1,12 @@
 from dataclasses import fields
 from subprocess import CalledProcessError
 from datetime import datetime, timezone
+from glob import glob
+import os
 
 from base import Benchmark, Language
-from errors import ProgramError, UnexpectedStdoutError
+from errors import ProgramError, EnvironmentError
+from environments import Environment
 from utils import *
 import languages
 
@@ -60,35 +63,24 @@ Note:
 - The start_rapl() library function reads the RAPL_ITERATIONS environment variable internally and returns an integer denoting how many iterations remain.
     """
 
-    def __init__(self, base_dir: str) -> None:
+    def __init__(self, base_dir: str, env: Environment) -> None:
         self.base_dir = base_dir
+        self.env = env
         self.timestamp = datetime.now(timezone.utc).timestamp()
 
-    def run_benchmark(self, yaml_data: dict, warmup: bool, iterations: int) -> bool:
-        required_mappings = ["language", "name"]
-        missing_keys = [key for key in required_mappings if key not in yaml_data]
-        if missing_keys:
-            print_error(f"Benchmark missing required key(s): {', '.join(missing_keys)}")
-            return False
-
-        lang_str = yaml_data["language"]
-        lang_cls = self._get_language_class_by_str(lang_str)
-        if not lang_cls:
-            print_error(f"{lang_str} not available")
-            return False
-
-        benchmark = self._build_benchmark(yaml_data)
+    def run_benchmark(self, yaml: dict, warmup: bool, iterations: int, frequency: int) -> bool:
+        benchmark = self._build_benchmark(yaml)
         if not benchmark:
             return False
 
-        language = self._build_language(lang_cls, yaml_data, benchmark, warmup, iterations)
+        language = self._build_language(yaml, benchmark, warmup, iterations, frequency)
         if not language:
             return False
 
         print_info(str(language))
 
         try:
-            with language:
+            with self.env, language:
                 if warmup:
                     stdout = language.measure()
                     language.verify(stdout)
@@ -99,23 +91,38 @@ Note:
 
                 language.move_rapl(self.timestamp)
                 language.move_perf(self.timestamp)
-                print_success("Ok")
-        except (ProgramError, UnexpectedStdoutError, CalledProcessError) as ex:
+        except (ProgramError, CalledProcessError) as ex:
+            self._remove_if_exists("perf.json")
+            intel_csvs = glob("Intel_[0-9][0-9]*.csv")
+            if intel_csvs:
+                self._remove_if_exists(intel_csvs[0])
+            amd_csvs = glob("AMD_[0-9][0-9]*.csv")
+            if amd_csvs:
+                self._remove_if_exists(amd_csvs[0])
             print_error(str(ex))
-            return False
+            success = False
+        except EnvironmentError as ex:
+            print_error(str(ex))
+            success = False
+        else:
+            print_success("Ok")
+            success = True
 
-        return True
+        return success
 
-    def _get_language_class_by_str(self, language_str: str) -> type[Language] | None:
-        available_languages = [getattr(languages, name) for name in languages.__all__]
-        for lang_cls in available_languages:
-            if language_str.lower().strip() in lang_cls.aliases:
-                return lang_cls
-        return None
+    def _remove_if_exists(self, file_path) -> None:
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
-    def _build_benchmark(self, yaml_data: dict) -> Benchmark | None:
+    def _build_benchmark(self, yaml: dict) -> Benchmark | None:
+        required_mappings = ["language", "name"]
+        missing_keys = [key for key in required_mappings if key not in yaml]
+        if missing_keys:
+            print_error(f"Benchmark missing required key(s): {', '.join(missing_keys)}")
+            return None
+
         valid_bkeys = {f.name for f in fields(Benchmark)}
-        filtered_bdata = {k: v for k, v in yaml_data.items() if k in valid_bkeys}
+        filtered_bdata = {k: v for k, v in yaml.items() if k in valid_bkeys}
 
         if "args" in filtered_bdata and filtered_bdata["args"]:
             filtered_bdata["args"] = [str(arg) for arg in filtered_bdata["args"]]
@@ -126,22 +133,37 @@ Note:
             print_error(f"Error building benchmark: {ex}")
             return None
 
+    def _get_language_class_by_str(self, language_str: str) -> type[Language] | None:
+        available_languages = [getattr(languages, name) for name in languages.__all__]
+        for lang_cls in available_languages:
+            if language_str.lower().strip() in lang_cls.aliases:
+                return lang_cls
+        return None
+
     def _build_language(
         self,
-        lang_cls: type[Language],
-        yaml_data: dict,
+        yaml: dict,
         benchmark: Benchmark,
         warmup: bool,
         iterations: int,
+        frequency: int,
     ) -> Language | None:
+        lang_str = yaml["language"]
+        lang_cls = self._get_language_class_by_str(lang_str)
+        if not lang_cls:
+            print_error(f"{lang_str} not available")
+            return None
+
         valid_lkeys = {f.name for f in fields(lang_cls)}
-        filtered_ldata = {k: v for k, v in yaml_data.items() if k in valid_lkeys}
+        filtered_ldata = {k: v for k, v in yaml.items() if k in valid_lkeys}
         try:
             return lang_cls(
                 base_dir=self.base_dir,
                 benchmark=benchmark,
                 warmup=warmup,
                 iterations=iterations,
+                frequency=frequency,
+                niceness=self.env.niceness,
                 **filtered_ldata,
             )
         except TypeError as ex:

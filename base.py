@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from ollama import chat, ChatResponse
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import ClassVar
 from glob import glob
 import shutil
 import json
@@ -9,11 +9,6 @@ import subprocess
 import os
 
 from errors import *
-
-
-class Setup(ABC):
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.__init__(*args, **kwargs)
 
 
 @dataclass
@@ -35,10 +30,8 @@ class Language(ABC):
     benchmarks implemented in a specific language.
     """
 
-    # Configuration
+    # Base Dependencies
     base_dir: str
-    warmup: bool
-    iterations: int
     benchmark: Benchmark
 
     # Language Specifics
@@ -55,8 +48,11 @@ class Language(ABC):
     # RAPL Interface
     rapl_usage: str = ""
 
-    # Perf
-    perf_frequency: int = 500
+    # More Configurations with Defaults
+    warmup: bool = False
+    iterations: int = 1
+    frequency: int = 500
+    niceness: int | None = None
 
     def __str__(self) -> str:
         warmup_str = "warmup" if self.warmup else "no-warmup"
@@ -82,15 +78,16 @@ class Language(ABC):
         os.makedirs(results_dir, exist_ok=True)
         return results_dir
 
-    def _rapl_env(self) -> str:
-        return " ".join(
+    def _rapl_wrapper(self, command) -> str:
+        rapl_env = " ".join(
             [
                 f"LIBRARY_PATH={self.base_dir}:$(echo $NIX_LDFLAGS | sed 's/-rpath //g; s/-L//g' | tr ' ' ':'):$LIBRARY_PATH",
                 f"LD_LIBRARY_PATH={self.base_dir}:$(echo $NIX_LDFLAGS | sed 's/-rpath //g; s/-L//g' | tr ' ' ':'):$LD_LIBRARY_PATH",
                 f"CPATH={self.base_dir}:$(echo $NIX_CFLAGS_COMPILE | sed -e 's/-frandom-seed=[^ ]*//g' -e 's/-isystem/ /g' | tr -s ' ' | sed 's/ /:/g'):$CPATH",
-                f"RAPL_ITERATIONS={self.iterations if self.warmup else 1}",
+                f"RAPL_ITERATIONS={self.iterations}",
             ]
         )
+        return f"{rapl_env} {command}"
 
     def _get_available_perf_events(self) -> list[str]:
         requested_events = [
@@ -120,11 +117,24 @@ class Language(ABC):
 
         return captured_events
 
-    def _perf_command(self) -> str:
+    def _perf_wrapper(self, command: str) -> str:
         events = self._get_available_perf_events()
-        return (
-            f"perf stat --all-cpus -I {self.perf_frequency} --json --output perf.json -e "
+        perf_command = (
+            f"perf stat --all-cpus -I {self.frequency} --json --output perf.json -e "
             + ",".join(events)
+        )
+        return f"{perf_command} {command}"
+
+    def _nice_wrapper(self, command: str) -> str:
+        if self.niceness:
+            return f"nice -n {self.niceness} {command}"
+        return command
+
+    def _nix_wrapper(self, command: str) -> list[str]:
+        return (
+            ["nix-shell", "--no-build-output", "--quiet", "--packages"]
+            + self.nix_deps
+            + ["-I", f"nixpkgs={self.nix_commit}", "--run", command]
         )
 
     def _wrap_command(self, command: str, measuring: bool = False) -> list[str]:
@@ -132,16 +142,14 @@ class Language(ABC):
             raise ProgramBuildError("Benchmark must specify at least one nix dependency")
 
         if measuring:
-            # Measuring requires sudo because of rapl and perf
-            command = f"sudo -E {self._rapl_env()} {self._perf_command()} {command}"
+            command = self._perf_wrapper(command)
+            command = self._nice_wrapper(command)
+            command = self._rapl_wrapper(command)
+            command = f"sudo -E {command}"  # Measuring requires sudo because of rapl and perf
         else:
-            command = f"{self._rapl_env()} {command}"
+            command = self._rapl_wrapper(command)
 
-        return (
-            ["nix-shell", "--no-build-output", "--quiet", "--packages"]
-            + self.nix_deps
-            + ["-I", f"nixpkgs={self.nix_commit}", "--run", command]
-        )
+        return self._nix_wrapper(command)
 
     @property
     def benchmark_path(self) -> str:
@@ -196,7 +204,7 @@ class Language(ABC):
         if self.benchmark.stdin:
             stdin = self.benchmark.stdin
             if isinstance(stdin, str):
-                stdin = stdin.encode("utf-8")
+                stdin = stdin.encode()
             result = subprocess.run(args=wrapped, check=True, capture_output=True, input=stdin)
         else:
             result = subprocess.run(args=wrapped, check=True, capture_output=True)
@@ -211,13 +219,13 @@ class Language(ABC):
             return
 
         if isinstance(expected, str):
-            expected = expected.encode("utf-8")
+            expected = expected.encode()
 
         if self.warmup:
             expected = expected * self.iterations
 
         if stdout != expected:
-            raise UnexpectedStdoutError(expected, stdout)
+            raise ProgramVerificationError(expected, stdout)
 
     def clean(self) -> None:
         cmd = " ".join(self.clean_command)

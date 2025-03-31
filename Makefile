@@ -4,7 +4,7 @@ PREFIX := $(HOME)
 BASE_DIR := $(PREFIX)/.$(NAME)
 
 # Rapl Interface Library
-RAPL_DIR := rapl-interface
+RAPL_DIR := rapl_interface
 RAPL_SO := $(RAPL_DIR)/target/release/librapl_interface.so
 RAPL_HEADER := $(RAPL_DIR)/rapl_interface.h
 
