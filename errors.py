@@ -24,11 +24,10 @@ class ProgramCleanError(ProgramError):
     pass
 
 
-class ProgramVerificationError(Exception):
-    def __init__(self, expected: str | bytes, actual: str | bytes, *args: object) -> None:
+class ProgramVerificationError(ProgramError):
+    def __init__(self, expected: str | bytes, actual: str | bytes) -> None:
         self.expected = expected
         self.actual = actual
-        super().__init__(*args)
 
     def __str__(self) -> str:
         # lines1 = self.expected.splitlines(keepends=True)

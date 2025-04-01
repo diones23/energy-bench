@@ -55,8 +55,12 @@ class Language(ABC):
     niceness: int | None = None
 
     def __str__(self) -> str:
-        warmup_str = "warmup" if self.warmup else "no-warmup"
-        return f"{self.__class__.__name__} {self.benchmark.name} {warmup_str} iterations={self.iterations}"
+        warmup_str = "Warmup" if self.warmup else "No-Warmup"
+        lang_str = self.__class__.__name__
+        return (
+            f"Benchmark : [{lang_str} {self.benchmark.name}] [{warmup_str}] [{self.iterations} iters]\n"
+            f"            [nice {self.niceness}] [perf {self.frequency}]\n"
+        )
 
     def __enter__(self):
         if not os.path.exists(self.benchmark_path):

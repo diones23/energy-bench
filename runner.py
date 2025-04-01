@@ -77,10 +77,10 @@ Note:
         if not language:
             return False
 
-        print_info(str(language))
-
         try:
             with self.env, language:
+                print(self.env)
+                print(language)
                 if warmup:
                     stdout = language.measure()
                     language.verify(stdout)
@@ -91,28 +91,22 @@ Note:
 
                 language.move_rapl(self.timestamp)
                 language.move_perf(self.timestamp)
-        except (ProgramError, CalledProcessError) as ex:
-            self._remove_if_exists("perf.json")
-            intel_csvs = glob("Intel_[0-9][0-9]*.csv")
-            if intel_csvs:
-                self._remove_if_exists(intel_csvs[0])
-            amd_csvs = glob("AMD_[0-9][0-9]*.csv")
-            if amd_csvs:
-                self._remove_if_exists(amd_csvs[0])
-            print_error(str(ex))
-            success = False
-        except EnvironmentError as ex:
-            print_error(str(ex))
-            success = False
-        else:
-            print_success("Ok")
-            success = True
+        except (EnvironmentError, ProgramError, CalledProcessError, KeyboardInterrupt) as ex:
+            self._remove_files_if_exist("perf.json")
+            self._remove_files_if_exist("Intel_[0-9][0-9]*.csv")
+            self._remove_files_if_exist("AMD_[0-9][0-9]*.csv")
+            if not isinstance(ex, KeyboardInterrupt):
+                print_error(str(ex))
+            return False
 
-        return success
+        print_success("Ok\n")
+        return True
 
-    def _remove_if_exists(self, file_path) -> None:
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    def _remove_files_if_exist(self, path) -> None:
+        files = glob(path)
+        for file in files:
+            if os.path.exists(file):
+                os.remove(file)
 
     def _build_benchmark(self, yaml: dict) -> Benchmark | None:
         required_mappings = ["language", "name"]

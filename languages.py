@@ -70,7 +70,7 @@ class CSharp(Language):
 
     @property
     def measure_command(self) -> list[str]:
-        return ["envDOTNET_ROOT=$(dirname $(readlink -f $(which dotnet)))", self.target_path]
+        return ["env DOTNET_ROOT=$(dirname $(readlink -f $(which dotnet)))", self.target_path]
 
     @property
     def clean_command(self) -> list[str]:

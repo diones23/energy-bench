@@ -112,8 +112,6 @@ def parse_args() -> argparse.Namespace:
 def measure_command(base_dir: str, options: argparse.Namespace, yaml_paths: list[str]) -> int:
     errors = 0
 
-    env = Production()
-
     if options.lab:
         env = Lab()
     elif options.light:
@@ -146,7 +144,7 @@ def measure_command(base_dir: str, options: argparse.Namespace, yaml_paths: list
                 return errors
             continue
 
-        print_info(f"Loading file '{path}'")
+        print_info(f"Loading file '{path}'\n")
 
         try:
             with open(path) as file:
