@@ -2,12 +2,23 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 import os
 
-from base import Language
+from spec import Language
 
 """
 All supported languages. Can be extended
 """
-__all__ = ["C", "Cpp", "CSharp", "Java", "JavaScript", "Python", "Rust"]
+__all__ = [
+    "C",
+    "Cpp",
+    "CSharp",
+    "Java",
+    "GraalVm",
+    "OpenJdk",
+    "Semeru",
+    "JavaScript",
+    "Python",
+    "Rust",
+]
 
 
 @dataclass
@@ -16,14 +27,18 @@ class C(Language):
     target: str = "main"
     source: str = "main.c"
     rapl_usage: str = """
-        #include <rapl_interface.h> // brings start_rapl and stop_rapl in scope
+        #include <rapl_interface.h>
+        // initialize method definition
+        // run_benchmark method definition
+        // cleanup method definition
+        // ... rest of the code
         int main() {
             while (1) {
-                char *str = (char *)malloc(16 * sizeof(char)); // initialization code
+                // initialize method call
                 if (start_rapl() == 0) break;
-                printf("%s\n", str); // code to be measured
+                // run_benchmark method call
                 stop_rapl();
-                free(str) // cleanup code
+                // cleanup method call
             }
             return 0;
         }
@@ -31,7 +46,14 @@ class C(Language):
 
     @property
     def build_command(self) -> list[str]:
-        return ["gcc", self.source_path, "-o", self.target_path, "-w", "-lrapl_interface"]
+        return [
+            "gcc",
+            self.source_path,
+            "-o",
+            self.target_path,
+            "-w",
+            "-lrapl_interface",
+        ]
 
     @property
     def measure_command(self) -> list[str]:
@@ -39,7 +61,7 @@ class C(Language):
 
     @property
     def clean_command(self) -> list[str]:
-        return ["rm", "-f", self.target_path, self.source_path]
+        return ["rm", "-f", self.target_path]
 
 
 @dataclass
@@ -49,7 +71,14 @@ class Cpp(C):
 
     @property
     def build_command(self) -> list[str]:
-        return ["g++", self.source_path, "-o", self.target_path, "-w", "-lrapl_interface"]
+        return [
+            "g++",
+            self.source_path,
+            "-o",
+            self.target_path,
+            "-w",
+            "-lrapl_interface",
+        ]
 
 
 @dataclass
@@ -57,7 +86,6 @@ class CSharp(Language):
     # C# specific
     packages: list[dict] = field(default_factory=list)
 
-    # Generic
     aliases: ClassVar[list[str]] = ["c#", "cs", "csharp"]
     target: str = os.path.join("bin", "Release", "net*", "program")
     source: str = "Program.cs"
@@ -66,11 +94,22 @@ class CSharp(Language):
 
     @property
     def build_command(self) -> list[str]:
-        return ["dotnet", "build", self.benchmark_path, "--nologo", "-v q", "-p:WarningLevel=0"]
+        return [
+            "dotnet",
+            "build",
+            self.benchmark_path,
+            "--nologo",
+            "-v q",
+            "-p:WarningLevel=0",
+            "-p:UseSharedCompilation=false",
+        ]
 
     @property
     def measure_command(self) -> list[str]:
-        return ["env DOTNET_ROOT=$(dirname $(readlink -f $(which dotnet)))", self.target_path]
+        return [
+            "env DOTNET_ROOT=$(dirname $(readlink -f $(which dotnet)))",
+            self.target_path,
+        ]
 
     @property
     def clean_command(self) -> list[str]:
@@ -97,46 +136,74 @@ class CSharp(Language):
 
 @dataclass
 class Java(Language):
+    # Java specific
+    class_paths: list[str] = field(default_factory=list)
+    roptions: list[str] = field(default_factory=list)
+
     aliases: ClassVar[list[str]] = ["java"]
-    target: str = "main"
-    source: str = "main.c"
+    target: str = "Program"
+    source: str = "Program.java"
     rapl_usage: str = """
-        #include <rapl_interface.h> // brings start_rapl and stop_rapl in scope
-        int main() {
-            while (1) {
-                char *str = (char *)malloc(16 * sizeof(char)); // initialization code
-                if (start_rapl() == 0) break;
-                printf("%s\n", str); // code to be measured
-                stop_rapl();
-                free(str) // cleanup code
-            }
-            return 0;
-        }
     """
 
     @property
+    def _cp_flag(self) -> str:
+        return f"-cp {self.base_dir}:{self.benchmark_path}:{':'.join(self.class_paths)}"
+
+    @property
     def build_command(self) -> list[str]:
-        return ["gcc", self.source_path, "-o", self.target_path, "-lrapl_interface"]
+        return [
+            "javac",
+            "-nowarn",
+            f"-d {self.benchmark_path}",
+            self._cp_flag,
+            self.source_path,
+        ]
 
     @property
     def measure_command(self) -> list[str]:
-        return [self.target_path]
+        return [
+            "$(which java)",
+            "--enable-native-access=ALL-UNNAMED",
+            self._cp_flag,
+            self.target,
+            *self.roptions,
+        ]
 
     @property
     def clean_command(self) -> list[str]:
-        return ["rm", "-f", self.target_path, self.source_path]
+        classes_path = f"{self.benchmark_path}/*.class"
+        return ["rm", "-f", classes_path]
+
+
+@dataclass
+class GraalVm(Java):
+    aliases: ClassVar[list[str]] = ["graalvm"]
+
+
+@dataclass
+class OpenJdk(Java):
+    aliases: ClassVar[list[str]] = ["openjdk"]
+
+
+@dataclass
+class Semeru(Java):
+    aliases: ClassVar[list[str]] = ["semeru"]
 
 
 @dataclass
 class JavaScript(Language):
-    pass
+    # Generic
+    aliases: ClassVar[list[str]] = ["javascript", "js"]
 
 
 @dataclass
 class Python(Language):
-    pass
+    # Generic
+    aliases: ClassVar[list[str]] = ["python", "py"]
 
 
 @dataclass
 class Rust(Language):
-    pass
+    # Generic
+    aliases: ClassVar[list[str]] = ["rust", "rs"]

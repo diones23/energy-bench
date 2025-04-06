@@ -13,15 +13,6 @@ from environments import *
 from utils import *
 
 
-def is_yaml_file(file_path: str) -> bool:
-    filename = os.path.basename(file_path)
-    split = os.path.splitext(filename)
-    if len(split) < 2:
-        return False
-    ext = os.path.splitext(file_path)[1].lower()
-    return ext in [".yaml", ".yml"]
-
-
 def parse_input() -> set[str]:
     file_paths = set()
     if not sys.stdin.isatty():
@@ -160,8 +151,9 @@ def measure_command(base_dir: str, options: argparse.Namespace, yaml_paths: list
             status = runner.run_benchmark(
                 data, mode == "warmup", options.iterations, options.frequency
             )
-            if not status and options.stop:
+            if not status:
                 errors += 1
+            if options.stop:
                 return errors
 
     return errors

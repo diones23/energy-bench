@@ -10,6 +10,7 @@ use std::{
 };
 use std::path::Path;
 use thiserror::Error;
+use std::sync::Mutex;
 
 #[cfg(amd)]
 use crate::rapl::amd::MSR_RAPL_POWER_UNIT;
@@ -46,7 +47,7 @@ static RAPL_INIT: Once = Once::new();
 static RAPL_POWER_UNITS: OnceCell<u64> = OnceCell::new();
 
 // Global CSV writer
-static mut CSV_WRITER: Option<Writer<File>> = None;
+static CSV_WRITER: OnceCell<Mutex<Writer<File>>> = OnceCell::new();
 static CPU0_MSR_FD: OnceCell<File> = OnceCell::new();
 
 /// AMD-specific constants (only compiled if `#[cfg(amd)]`).
@@ -224,43 +225,44 @@ where
     C: IntoIterator<Item = U>,
     U: AsRef<[u8]>,
 {
-    let wtr = match unsafe { CSV_WRITER.as_mut() } {
-        Some(wtr) => {
-            // Already initialized, just use it.
-            wtr
+    let wtr_mutex = CSV_WRITER.get_or_init(|| {
+        // Get the output directory from the RAPL_OUTPUT env variable.
+        // Defaults to the current directory if not set.
+        let dir = env::var("RAPL_OUTPUT").unwrap_or_else(|_| ".".to_string());
+
+        // Build the CSV file name using get_cpu_type() and RAPL_POWER_UNITS.
+        let file_name = format!(
+            "{}_{}.csv",
+            get_cpu_type(),
+            RAPL_POWER_UNITS.get().expect("failed to get RAPL power units")
+        );
+
+        // Combine the directory and file name into a full file path.
+        let file_path = Path::new(&dir).join(file_name);
+
+        // Check if the file exists.
+        let file_exists = file_path.exists();
+
+        // Open the file in append mode (creating it if necessary).
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&file_path)
+            .expect("failed to open CSV file");
+
+        // Create the CSV writer.
+        let mut wtr = WriterBuilder::new().from_writer(file);
+
+        // If the file is new or empty, write the header row.
+        if !file_exists || std::fs::metadata(&file_path).expect("failed to read file metadata").len() == 0 {
+            wtr.write_record(columns).expect("failed to write CSV header");
         }
-        None => {
-            // Build the CSV file path
-            let file_path = format!(
-                "{}_{}.csv",
-                get_cpu_type(),
-                RAPL_POWER_UNITS
-                    .get()
-                    .expect("failed to get RAPL power units")
-            );
 
-            // Check if the file exists
-            let file_exists = Path::new(&file_path).exists();
+        Mutex::new(wtr)
+    });
 
-            // Open in append mode
-            let file = OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&file_path)?;
-
-            // Create CSV writer
-            let mut wtr = WriterBuilder::new().from_writer(file);
-
-            if !file_exists || std::fs::metadata(&file_path)?.len() == 0 {
-                wtr.write_record(columns)?;
-            }
-
-            // Store it globally
-            unsafe { CSV_WRITER = Some(wtr) };
-            unsafe { CSV_WRITER.as_mut().expect("failed to get CSV writer") }
-        }
-    };
-
+    let mut wtr = wtr_mutex.lock().expect("failed to lock CSV writer");
+    
     // Write the actual data row
     wtr.serialize(data)?;
     wtr.flush()?;

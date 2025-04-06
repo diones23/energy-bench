@@ -1,14 +1,21 @@
-from dataclasses import fields
+from dataclasses import fields, MISSING
 from subprocess import CalledProcessError
 from datetime import datetime, timezone
-from glob import glob
 import os
 
-from base import Benchmark, Language
+from spec import Benchmark, Language
 from errors import ProgramError, EnvironmentError
 from environments import Environment
 from utils import *
 import languages
+
+
+def get_language_class_by_str(language_str: str) -> type[Language] | None:
+    available_languages = [getattr(languages, name) for name in languages.__all__]
+    for lang_cls in available_languages:
+        if hasattr(lang_cls, "aliases") and language_str.lower().strip() in lang_cls.aliases:
+            return lang_cls
+    return None
 
 
 class Runner:
@@ -69,97 +76,85 @@ Note:
         self.timestamp = datetime.now(timezone.utc).timestamp()
 
     def run_benchmark(self, yaml: dict, warmup: bool, iterations: int, frequency: int) -> bool:
-        benchmark = self._build_benchmark(yaml)
-        if not benchmark:
-            return False
-
-        language = self._build_language(yaml, benchmark, warmup, iterations, frequency)
+        language = self._setup(yaml, warmup, iterations, frequency)
         if not language:
             return False
 
         try:
-            with self.env, language:
+            with language, self.env:
                 print(self.env)
                 print(language)
                 if warmup:
-                    stdout = language.measure()
-                    language.verify(stdout)
+                    language.measure()
+                    language.verify(iterations)
                 else:
                     for _ in range(iterations):
-                        stdout = language.measure()
-                        language.verify(stdout)
+                        language.measure()
+                        language.verify(1)
 
                 language.move_rapl(self.timestamp)
                 language.move_perf(self.timestamp)
-        except (EnvironmentError, ProgramError, CalledProcessError, KeyboardInterrupt) as ex:
-            self._remove_files_if_exist("perf.json")
-            self._remove_files_if_exist("Intel_[0-9][0-9]*.csv")
-            self._remove_files_if_exist("AMD_[0-9][0-9]*.csv")
-            if not isinstance(ex, KeyboardInterrupt):
+        except (ProgramError, EnvironmentError, CalledProcessError, KeyboardInterrupt) as ex:
+            if isinstance(ex, ProgramError):
+                perf_path = os.path.join(language.benchmark_path, "perf.json")
+                intel_path = os.path.join(language.benchmark_path, "Intel_[0-9][0-9]*.csv")
+                amd_path = os.path.join(language.benchmark_path, "AMD_[0-9][0-9]*.csv")
+                remove_files_if_exist(perf_path)
+                remove_files_if_exist(intel_path)
+                remove_files_if_exist(amd_path)
+            if isinstance(ex, KeyboardInterrupt):
+                print_error("Manually exited")
+            else:
                 print_error(str(ex))
             return False
-
         print_success("Ok\n")
         return True
 
-    def _remove_files_if_exist(self, path) -> None:
-        files = glob(path)
-        for file in files:
-            if os.path.exists(file):
-                os.remove(file)
-
-    def _build_benchmark(self, yaml: dict) -> Benchmark | None:
-        required_mappings = ["language", "name"]
+    def _setup(self, yaml: dict, warmup: bool, iterations: int, frequency: int) -> Language | None:
+        # Build Benchmark
+        all_mappings = {f.name for f in fields(Benchmark)}
+        required_mappings = {
+            f.name
+            for f in fields(Benchmark)
+            if f.default is MISSING and f.default_factory is MISSING
+        }
+        required_mappings.add("language")
         missing_keys = [key for key in required_mappings if key not in yaml]
         if missing_keys:
             print_error(f"Benchmark missing required key(s): {', '.join(missing_keys)}")
             return None
 
-        valid_bkeys = {f.name for f in fields(Benchmark)}
-        filtered_bdata = {k: v for k, v in yaml.items() if k in valid_bkeys}
-
-        if "args" in filtered_bdata and filtered_bdata["args"]:
-            filtered_bdata["args"] = [str(arg) for arg in filtered_bdata["args"]]
+        filtered = {k: v for k, v in yaml.items() if k in all_mappings}
+        if "args" in filtered and filtered["args"]:
+            filtered["args"] = [str(arg) for arg in filtered["args"]]
 
         try:
-            return Benchmark(**filtered_bdata)
+            benchmark = Benchmark(**filtered)
         except TypeError as ex:
             print_error(f"Error building benchmark: {ex}")
             return None
 
-    def _get_language_class_by_str(self, language_str: str) -> type[Language] | None:
-        available_languages = [getattr(languages, name) for name in languages.__all__]
-        for lang_cls in available_languages:
-            if language_str.lower().strip() in lang_cls.aliases:
-                return lang_cls
-        return None
-
-    def _build_language(
-        self,
-        yaml: dict,
-        benchmark: Benchmark,
-        warmup: bool,
-        iterations: int,
-        frequency: int,
-    ) -> Language | None:
+        # Build Language
         lang_str = yaml["language"]
-        lang_cls = self._get_language_class_by_str(lang_str)
+        lang_cls = get_language_class_by_str(lang_str)
         if not lang_cls:
             print_error(f"{lang_str} not available")
             return None
 
-        valid_lkeys = {f.name for f in fields(lang_cls)}
-        filtered_ldata = {k: v for k, v in yaml.items() if k in valid_lkeys}
+        all_mappings = {f.name for f in fields(lang_cls)}
+        filtered = {k: v for k, v in yaml.items() if k in all_mappings}
+
         try:
-            return lang_cls(
+            language = lang_cls(
                 base_dir=self.base_dir,
                 benchmark=benchmark,
                 warmup=warmup,
                 iterations=iterations,
                 frequency=frequency,
                 niceness=self.env.niceness,
-                **filtered_ldata,
+                **filtered,
             )
+            return language
         except TypeError as ex:
             print_error(f"Error creating language object: {ex}")
             return None

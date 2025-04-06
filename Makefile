@@ -7,6 +7,7 @@ BASE_DIR := $(PREFIX)/.$(NAME)
 RAPL_DIR := rapl_interface
 RAPL_SO := $(RAPL_DIR)/target/release/librapl_interface.so
 RAPL_HEADER := $(RAPL_DIR)/rapl_interface.h
+RAPL_JNI := $(RAPL_DIR)/RaplInterface.java
 
 all: $(RAPL_SO)
 
@@ -18,6 +19,7 @@ install: $(RAPL_SO)
 
 	install -m 755 $(RAPL_SO) $(BASE_DIR)
 	install -m 644 $(RAPL_HEADER) $(BASE_DIR)
+	install -m 644 $(RAPL_JNI) $(BASE_DIR)
 
 uninstall:
 	rm -rf $(BASE_DIR)

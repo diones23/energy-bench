@@ -1,6 +1,5 @@
 name: binary-trees
-args:
-    - 21
+args: [21]
 expected_stdout: |
     stretch tree of depth 22	 check: 8388607
     2097152	 trees of depth 4	 check: 65011712
