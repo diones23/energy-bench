@@ -1,7 +1,9 @@
 from dataclasses import dataclass
-import subprocess
+from typing import Any
 import os
 
+from errors import ProgramError
+from utils import write_file_sudo, read_file
 
 class Cpu:
     def __init__(self, value: int) -> None:
@@ -9,7 +11,7 @@ class Cpu:
         if os.path.isdir(self.cpu_path):
             self.value = value
         else:
-            raise EnvironmentError(f"Cpu {value} doesn't exist.")
+            raise ProgramError(f"Cpu {value} doesn't exist.")
 
     @property
     def enabled(self) -> bool:
@@ -24,15 +26,15 @@ class Cpu:
     def enabled(self, value: bool) -> None:
         path = f"{self.cpu_path}/online"
         if self.value != 0:
-            _write_file_sudo(path, "1" if value else "0")
+            write_file_sudo("1" if value else "0", path)
 
     @property
     def hyperthread(self) -> bool:
         path = f"{self.cpu_path}/topology/thread_siblings_list"
 
         try:
-            siblings_str = _read_file_safe(path)
-        except EnvironmentError:
+            siblings_str = read_file(path)
+        except ProgramError:
             return False
 
         siblings = []
@@ -53,34 +55,34 @@ class Cpu:
     @property
     def governor(self) -> str:
         path = f"{self.cpu_path}/cpufreq/scaling_governor"
-        return _read_file_safe(path)
+        return read_file(path)
 
     @governor.setter
     def governor(self, value: str) -> None:
         path = f"{self.cpu_path}/cpufreq/scaling_governor"
         if value not in self.available_governors:
-            raise EnvironmentError(f"Governor '{value}' not available on CPU {self.value}.")
-        _write_file_sudo(path, value)
+            raise ProgramError(f"governor '{value}' not available on CPU {self.value}.")
+        write_file_sudo(value, path)
 
     @property
     def available_governors(self) -> list[str]:
         path = f"{self.cpu_path}/cpufreq/scaling_available_governors"
-        return _read_file_safe(path).split()
+        return read_file(path).split()
 
     @property
     def min_hw_freq(self) -> int:
         path = f"{self.cpu_path}/cpufreq/cpuinfo_min_freq"
-        return int(_read_file_safe(path))
+        return int(read_file(path))
 
     @property
     def max_hw_freq(self) -> int:
         path = f"{self.cpu_path}/cpufreq/cpuinfo_max_freq"
-        return int(_read_file_safe(path))
+        return int(read_file(path))
 
     @property
     def min_freq(self) -> int:
         path = f"{self.cpu_path}/cpufreq/scaling_min_freq"
-        return int(_read_file_safe(path))
+        return int(read_file(path))
 
     @min_freq.setter
     def min_freq(self, value: int) -> None:
@@ -88,15 +90,15 @@ class Cpu:
         hw_max = self.max_hw_freq
         path = f"{self.cpu_path}/cpufreq/scaling_min_freq"
         if not (hw_min <= value <= hw_max):
-            raise EnvironmentError(
-                f"Frequency {value} cannot be outside hardware limits [{hw_min}, {hw_max}]"
+            raise ProgramError(
+                f"frequency {value} cannot be outside hardware limits [{hw_min}, {hw_max}]"
             )
-        _write_file_sudo(path, str(value))
+        write_file_sudo(str(value), path)
 
     @property
     def max_freq(self) -> int:
         path = f"{self.cpu_path}/cpufreq/scaling_max_freq"
-        return int(_read_file_safe(path))
+        return int(read_file(path))
 
     @max_freq.setter
     def max_freq(self, value: int) -> None:
@@ -104,44 +106,28 @@ class Cpu:
         hw_max = self.max_hw_freq
         path = f"{self.cpu_path}/cpufreq/scaling_max_freq"
         if not (hw_min <= value <= hw_max):
-            raise EnvironmentError(
-                f"Frequency {value} cannot be outside hardware limits [{hw_min}, {hw_max}]"
+            raise ProgramError(
+                f"frequency {value} cannot be outside hardware limits [{hw_min}, {hw_max}]"
             )
-        _write_file_sudo(path, str(value))
-
-
-def _read_file_safe(path: str) -> str:
-    try:
-        if os.path.exists(path):
-            with open(path, "r") as file:
-                return file.read().strip()
-        raise EnvironmentError(f"File {path} doesn't exist.")
-    except OSError:
-        raise EnvironmentError(f"Could not read file {path}.")
-
-
-def _write_file_sudo(path: str, value: str) -> None:
-    subprocess.run(
-        ["sudo", "tee", path], input=value.encode(), check=True, stdout=subprocess.DEVNULL
-    )
+        write_file_sudo(str(value), path)
 
 
 def get_cpu_vendor() -> str:
-    cpuinfo = _read_file_safe("/proc/cpuinfo")
+    cpuinfo = read_file("/proc/cpuinfo")
     if "GenuineIntel" in cpuinfo:
         return "intel"
     if "AuthenticAMD" in cpuinfo:
         return "amd"
-    raise EnvironmentError("Unknown CPU vendor")
+    raise ProgramError("Unknown CPU vendor")
 
 
 def get_cpus(value: str) -> list[Cpu]:
     available_modes = ["online", "offline", "present", "possible"]
     if not value in available_modes:
-        raise EnvironmentError(f"Can only get {','.join(available_modes)} CPUs")
+        raise ProgramError(f"Can only get {','.join(available_modes)} CPUs")
 
     cpus: list[Cpu] = []
-    content = _read_file_safe(f"/sys/devices/system/cpu/{value}")
+    content = read_file(f"/sys/devices/system/cpu/{value}")
     if not content:
         return []
 
@@ -155,26 +141,27 @@ def get_cpus(value: str) -> list[Cpu]:
 
 
 def get_aslr() -> int:
-    val = _read_file_safe("/proc/sys/kernel/randomize_va_space")
+    val = read_file("/proc/sys/kernel/randomize_va_space")
     return int(val)
 
 
 def set_aslr(value: int) -> None:
     if value not in [0, 1, 2]:
-        raise EnvironmentError(f"Unsupported ASLR mode: {value}")
-    _write_file_sudo("/proc/sys/kernel/randomize_va_space", str(value))
+        raise ProgramError(f"unsupported ASLR mode {value}")
+    write_file_sudo(str(value), "/proc/sys/kernel/randomize_va_space")
 
 
 def get_intel_boost() -> bool:
     path = "/sys/devices/system/cpu/intel_pstate/no_turbo"
-    value = _read_file_safe(path)
+    value = read_file(path)
     return not (value == "1")
 
 
 def set_intel_boost(enable: bool) -> None:
     path = "/sys/devices/system/cpu/intel_pstate/no_turbo"
-    _read_file_safe(path)
-    _write_file_sudo(path, "0" if enable == True else "1")
+    if not os.path.exists(path):
+        raise ProgramError(f"file {path} doesn't exist")
+    write_file_sudo("0" if enable == True else "1", path)
 
 
 @dataclass
@@ -183,7 +170,7 @@ class Environment:
 
     niceness: int | None = None
 
-    def _record_original(self):
+    def record_original(self):
         self._orig_aslr = get_aslr()
         if get_cpu_vendor() == "intel":
             self._orig_intel_boost = get_intel_boost()
@@ -202,7 +189,7 @@ class Environment:
                     "enabled": False
                 }
 
-    def _restore_original(self):
+    def restore_original(self):
         set_aslr(self._orig_aslr)
         if get_cpu_vendor() == "intel":
             set_intel_boost(self._orig_intel_boost)
@@ -273,17 +260,21 @@ class Environment:
         )
 
     def __enter__(self):
+        self.record_original()
+        self.enter()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type: type | None, exc_value: Exception | None, traceback: Any | None) -> bool:
+        self.restore_original()
         return False
+
+    def enter(self) -> None:
+        pass
 
 
 @dataclass
 class Production(Environment):
-    def __enter__(self):
-        self._record_original()
-
+    def enter(self) -> None:
         set_aslr(2) # Enable ASLR
 
         set_intel_boost(True) # Enable Turbo Boost on Intel
@@ -294,31 +285,16 @@ class Production(Environment):
             cpu.max_freq = cpu.max_hw_freq # Max Hardware Frequency on all CPUs
             cpu.min_freq = cpu.min_hw_freq # Min Hardware Frequency on all CPUs
 
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._restore_original()
-        return False
-
 
 @dataclass
 class Lightweight(Environment):
-    def __enter__(self):
-        self._record_original()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._restore_original()
-        return False
-
+    pass
 
 @dataclass
 class Lab(Environment):
     niceness: int | None = -20
 
-    def __enter__(self):
-        self._record_original()
-
+    def enter(self) -> None:
         set_aslr(0) # Enable ASLR
 
         set_intel_boost(False) # Enable Turbo Boost on Intel
@@ -331,12 +307,6 @@ class Lab(Environment):
             cpu.enabled = False # Disable all but Cores 0, 1, 2, 3
 
         for cpu in get_cpus("online"):
-            cpu.governor = "powersave" # Peformance Governor on all CPUs
+            cpu.governor = "powersave" # Powersave Governor on all CPUs
             cpu.max_freq = cpu.min_hw_freq # Min Hardware Frequency on all CPUs
             cpu.min_freq = cpu.min_hw_freq # Min Hardware Frequency on all CPUs
-
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._restore_original()
-        return False

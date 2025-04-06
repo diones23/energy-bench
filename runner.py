@@ -1,13 +1,13 @@
 from dataclasses import fields, MISSING
-from subprocess import CalledProcessError
 from datetime import datetime, timezone
 import os
 
 from spec import Benchmark, Language
-from errors import ProgramError, EnvironmentError
+from errors import ProgramError
 from environments import Environment
 from utils import *
 import languages
+from workloads import Workload
 
 
 def get_language_class_by_str(language_str: str) -> type[Language] | None:
@@ -70,20 +70,31 @@ Note:
 - The start_rapl() library function reads the RAPL_ITERATIONS environment variable internally and returns an integer denoting how many iterations remain.
     """
 
-    def __init__(self, base_dir: str, env: Environment) -> None:
+    def __init__(self, base_dir: str) -> None:
         self.base_dir = base_dir
-        self.env = env
         self.timestamp = datetime.now(timezone.utc).timestamp()
 
-    def run_benchmark(self, yaml: dict, warmup: bool, iterations: int, frequency: int) -> bool:
-        language = self._setup(yaml, warmup, iterations, frequency)
+    def run_benchmark(
+        self,
+        yaml: dict,
+        env: Environment,
+        workload: Workload,
+        warmup: bool,
+        iterations: int,
+        frequency: int,
+    ) -> bool:
+        language = self._setup(yaml, env, warmup, iterations, frequency)
         if not language:
             return False
 
         try:
-            with language, self.env:
-                print(self.env)
-                print(language)
+            with language, env, workload:
+                splash = create_splash_screen(
+                    env, workload, language, warmup, iterations, frequency, timestamp=self.timestamp
+                )
+                print(splash)
+                print("")
+
                 if warmup:
                     language.measure()
                     language.verify(iterations)
@@ -94,23 +105,30 @@ Note:
 
                 language.move_rapl(self.timestamp)
                 language.move_perf(self.timestamp)
-        except (ProgramError, EnvironmentError, CalledProcessError, KeyboardInterrupt) as ex:
-            if isinstance(ex, ProgramError):
-                perf_path = os.path.join(language.benchmark_path, "perf.json")
-                intel_path = os.path.join(language.benchmark_path, "Intel_[0-9][0-9]*.csv")
-                amd_path = os.path.join(language.benchmark_path, "AMD_[0-9][0-9]*.csv")
-                remove_files_if_exist(perf_path)
-                remove_files_if_exist(intel_path)
-                remove_files_if_exist(amd_path)
-            if isinstance(ex, KeyboardInterrupt):
-                print_error("Manually exited")
-            else:
-                print_error(str(ex))
+        except ProgramError as ex:
+            perf_path = os.path.join(language.benchmark_path, "perf.json")
+            intel_path = os.path.join(language.benchmark_path, "Intel_[0-9][0-9]*.csv")
+            amd_path = os.path.join(language.benchmark_path, "AMD_[0-9][0-9]*.csv")
+            remove_files_if_exist(perf_path)
+            remove_files_if_exist(intel_path)
+            remove_files_if_exist(amd_path)
+            print_error(str(ex))
             return False
-        print_success("Ok\n")
+        except KeyboardInterrupt as ex:
+            print_error("Manually exited")
+            return False
+        print_success("Ok")
+        print("")
         return True
 
-    def _setup(self, yaml: dict, warmup: bool, iterations: int, frequency: int) -> Language | None:
+    def _setup(
+        self,
+        yaml: dict,
+        env: Environment,
+        warmup: bool,
+        iterations: int,
+        frequency: int,
+    ) -> Language | None:
         # Build Benchmark
         all_mappings = {f.name for f in fields(Benchmark)}
         required_mappings = {
@@ -151,7 +169,7 @@ Note:
                 warmup=warmup,
                 iterations=iterations,
                 frequency=frequency,
-                niceness=self.env.niceness,
+                niceness=env.niceness,
                 **filtered,
             )
             return language

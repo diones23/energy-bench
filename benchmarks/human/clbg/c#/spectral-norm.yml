@@ -25,29 +25,37 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/sp
         {
             int current;
             int threads;
-            ManualResetEvent handle = new ManualResetEvent(false);
+            ManualResetEvent handle;
 
             public BarrierHandle(int threads)
             {
                 this.current = threads;
                 this.threads = threads;
+                this.handle = new ManualResetEvent(false);
             }
 
             public override bool WaitOne()
             {
-                ManualResetEvent h = handle;
+                // Store local reference to prevent disposal while in use
+                ManualResetEvent localHandle = handle;
+                
                 if (Interlocked.Decrement(ref current) > 0)
                 {
-                    h.WaitOne();
+                    // Not the last thread, just wait
+                    localHandle.WaitOne();
                 }
                 else
                 {
+                    // Last thread, create new event for next barrier
                     handle = new ManualResetEvent(false);
+                    
+                    // Reset count for next round
                     Interlocked.Exchange(ref current, threads);
-                    h.Set();
-                    h.Close();
+                    
+                    // Signal waiting threads
+                    localHandle.Set();
                 }
-
+                
                 return true;
             }
         }

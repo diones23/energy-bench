@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from ollama import chat, ChatResponse
 from abc import ABC, abstractmethod
+from subprocess import CalledProcessError
 from typing import ClassVar, Any
 from glob import glob
 import shutil
@@ -168,7 +169,7 @@ class Language(ABC):
 
     def _wrap_command(self, command: str, measuring: bool = False) -> list[str]:
         if not self.nix_deps:
-            raise ProgramBuildError("Benchmark must specify at least one nix dependency")
+            raise ProgramError("Benchmark must specify at least one nix dependency")
 
         if measuring:
             command = self._perf_wrapper(command)
@@ -195,23 +196,22 @@ class Language(ABC):
 
     def build(self) -> None:
         if not self.benchmark.code:
-            raise ProgramBuildError("Benchmark doesn't have any source code")
+            raise ProgramError("Benchmark doesn't have any source code")
 
         if not self.nix_deps:
-            raise ProgramBuildError("Benchmark must specify at least one nix dependency")
+            raise ProgramError("Benchmark must specify at least one nix dependency")
+
+        write_file(self.benchmark.code, self.source_path)
+        cmd = " ".join(self.build_command + self.benchmark.options)
+        wrapped = self._wrap_command(cmd)
 
         try:
-            with open(self.source_path, "w") as file:
-                file.write(self.benchmark.code)
-
-            cmd = " ".join(self.build_command + self.benchmark.options)
-            wrapped = self._wrap_command(cmd)
             result = subprocess.run(args=wrapped, check=True, capture_output=True)
+        except CalledProcessError as ex:
+            raise ProgramError(f"failed while building - {ex}")
 
-            if result.stderr:
-                raise ProgramBuildError(result.stderr.decode())
-        except IOError as ex:
-            raise ProgramBuildError(f"Failed to store benchmark code: {ex}")
+        if result.stderr:
+            raise ProgramError(result.stderr.decode())
 
     def measure(self) -> None:
         cmd = " ".join(self.measure_command + self.benchmark.args)
@@ -225,11 +225,11 @@ class Language(ABC):
                 result = subprocess.run(
                     args=wrapped, check=True, stdout=outfile, stderr=subprocess.PIPE, stdin=infile
                 )
-
-            if result.stderr:
-                raise ProgramMeasureError(result.stderr.decode())
         except IOError as ex:
-            raise ProgramMeasureError(f"Failed to measure benchmark: {ex}")
+            raise ProgramError(f"failed while performing IO on measurement - {ex}")
+
+        if result.stderr:
+            raise ProgramError(result.stderr.decode())
 
     def verify(self, iterations: int) -> None:
         expected_path = os.path.join(self.benchmark_path, "expected")
@@ -242,19 +242,19 @@ class Language(ABC):
                 for i in range(iterations):
                     chunk = outfile.read(len(expected))
                     if len(chunk) != len(expected):
-                        raise ProgramVerificationError(
-                            f"Iteration {i + 1} didn't match expected stdout: lengths not matching."
+                        raise ProgramError(
+                            f"iteration {i + 1} didn't match expected stdout - lengths not matching"
                         )
                     if chunk != expected:
-                        raise ProgramVerificationError(
-                            f"Iteration {i + 1} didn't match expected stdout: unequal"
+                        raise ProgramError(
+                            f"iteration {i + 1} didn't match expected stdout - unequal"
                         )
 
                 remaining = outfile.read(1)
                 if remaining:
-                    raise ProgramVerificationError(f"Benchmark has more output than expected.")
+                    raise ProgramError(f"benchmark has more output than expected")
         except IOError as ex:
-            raise ProgramVerificationError(f"Failed to verify benchmark: {ex}")
+            raise ProgramError(f"failed to verify - {ex}")
 
     def clean(self) -> None:
         try:
@@ -266,37 +266,37 @@ class Language(ABC):
             remove_files_if_exist(os.path.join(self.benchmark_path, "expected"))
 
             if result.stderr:
-                raise ProgramCleanError(result.stderr.decode())
+                raise ProgramError(result.stderr.decode())
         except IOError as ex:
-            raise ProgramCleanError(f"Failed to clean benchmark: {ex}")
+            raise ProgramError(f"failed to clean benchmark: {ex}")
 
     def move_rapl(self, timestamp: float) -> None:
         intel_rapls = glob(os.path.join(self.benchmark_path, "Intel_[0-9][0-9]*.csv"))
         amd_rapls = glob(os.path.join(self.benchmark_path, "AMD_[0-9][0-9]*.csv"))
         rapls = intel_rapls + amd_rapls
         if not rapls:
-            raise ProgramMeasureError("Benchmark didn't generate a valid rapl measurement")
+            raise ProgramError("benchmark didn't generate a valid rapl measurement")
         if len(rapls) > 1:
-            raise ProgramMeasureError("Found more than one rapl measurements")
+            raise ProgramError("found more than one rapl measurements")
 
         results_dir = self._ensure_results_dir(timestamp)
         try:
             shutil.move(rapls[0], results_dir)
         except IOError as ex:
-            raise ProgramMeasureError(f"Failed to move RAPL files: {ex}")
+            raise ProgramError(f"failed to move RAPL files - {ex}")
 
     def move_perf(self, timestamp: float) -> None:
         perfs = glob(os.path.join(self.benchmark_path, "perf.json"))
         if not perfs:
-            raise ProgramMeasureError("Benchmark didn't generate a valid perf measurement")
+            raise ProgramError("benchmark didn't generate a valid perf measurement")
         if len(perfs) > 1:
-            raise ProgramMeasureError("Found more than one perf measurements")
+            raise ProgramError("found more than one perf measurements")
 
         results_dir = self._ensure_results_dir(timestamp)
         try:
             shutil.move(perfs[0], results_dir)
         except IOError as ex:
-            raise ProgramMeasureError(f"Failed to move perf files: {ex}")
+            raise ProgramError(f"failed to move perf files - {ex}")
 
     @property
     @abstractmethod

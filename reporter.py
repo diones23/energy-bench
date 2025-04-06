@@ -8,7 +8,7 @@ import re
 from pandas.errors import EmptyDataError
 from pandas import Series
 
-from errors import ReportError
+from errors import ProgramError
 
 
 class Reporter:
@@ -36,17 +36,60 @@ class Reporter:
         self, cpu: str, df: pd.DataFrame, power_unit: int
     ) -> tuple[Series, Series, Series, Series, Series]:
         multiplier = 0.5 ** ((power_unit >> 8) & 0x1F)
+
+        # Function to safely calculate the difference between register values, handling overflow
+        def safe_diff(current, previous, bits=32):
+            max_val = 2**bits - 1
+            if current < previous:  # Overflow occurred
+                return (current + max_val + 1 - previous) * multiplier
+            return (current - previous) * multiplier
+
         if cpu == "intel":
             time = df.iloc[:, 1] - df.iloc[:, 0]
-            core = (df.iloc[:, 3] - df.iloc[:, 2]) * multiplier
-            uncore = (df.iloc[:, 5] - df.iloc[:, 4]) * multiplier
-            pkg = (df.iloc[:, 7] - df.iloc[:, 6]) * multiplier
-            dram = (df.iloc[:, 9] - df.iloc[:, 8]) * multiplier
+
+            # Calculate energy values accounting for possible register overflow
+            core_prev, core_curr = df.iloc[:, 2], df.iloc[:, 3]
+            core = pd.Series(
+                [safe_diff(curr, prev) for prev, curr in zip(core_prev, core_curr)],
+                index=df.index,
+            )
+
+            uncore_prev, uncore_curr = df.iloc[:, 4], df.iloc[:, 5]
+            uncore = pd.Series(
+                [safe_diff(curr, prev) for prev, curr in zip(uncore_prev, uncore_curr)],
+                index=df.index,
+            )
+
+            pkg_prev, pkg_curr = df.iloc[:, 6], df.iloc[:, 7]
+            pkg = pd.Series(
+                [safe_diff(curr, prev) for prev, curr in zip(pkg_prev, pkg_curr)],
+                index=df.index,
+            )
+
+            dram_prev, dram_curr = df.iloc[:, 8], df.iloc[:, 9]
+            dram = pd.Series(
+                [safe_diff(curr, prev) for prev, curr in zip(dram_prev, dram_curr)],
+                index=df.index,
+            )
+
         elif cpu == "amd":
             time = df.iloc[:, 1] - df.iloc[:, 0]
-            core = (df.iloc[:, 3] - df.iloc[:, 2]) * multiplier
+
+            # Calculate energy values accounting for possible register overflow
+            core_prev, core_curr = df.iloc[:, 2], df.iloc[:, 3]
+            core = pd.Series(
+                [safe_diff(curr, prev) for prev, curr in zip(core_prev, core_curr)],
+                index=df.index,
+            )
+
             uncore = pd.Series(0, index=df.index)
-            pkg = (df.iloc[:, 5] - df.iloc[:, 4]) * multiplier
+
+            pkg_prev, pkg_curr = df.iloc[:, 4], df.iloc[:, 5]
+            pkg = pd.Series(
+                [safe_diff(curr, prev) for prev, curr in zip(pkg_prev, pkg_curr)],
+                index=df.index,
+            )
+
             dram = pd.Series(0, index=df.index)
         else:
             raise ValueError(f"Unsupported CPU type: {cpu}")
@@ -74,12 +117,12 @@ class Reporter:
                         cpu = "amd"
 
                     if not rapls:
-                        raise ReportError(f"No rapl measurement found in {bench_path}")
+                        raise ProgramError(f"no rapl measurement found in {bench_path}")
 
                     try:
                         df = pd.read_csv(rapls[0], header=0, skiprows=self.skip)
                     except EmptyDataError as ex:
-                        raise ReportError(f"Rapl measurement file empty or skipped too many rows")
+                        raise ProgramError(f"rapl measurement file empty or skipped too many rows")
 
                     power_unit = int(rapls[0].split("_")[-1].split(".")[0])
                     pkg, core, uncore, dram, time = self._calculate_energy(cpu, df, power_unit)
@@ -125,12 +168,12 @@ class Reporter:
                         cpu = "amd"
 
                     if not rapls:
-                        raise ReportError(f"No rapl measurement found in {bench_path}")
+                        raise ProgramError(f"no rapl measurement found in {bench_path}")
 
                     try:
                         df = pd.read_csv(rapls[0], header=0, skiprows=self.skip)
                     except EmptyDataError:
-                        raise ReportError(f"Rapl measurement file empty or skipped too many rows")
+                        raise ProgramError(f"rapl measurement file empty or skipped too many rows")
                     power_unit = int(rapls[0].split("_")[-1].split(".")[0])
                     pkg, core, uncore, dram, time = self._calculate_energy(cpu, df, power_unit)
 
@@ -164,7 +207,7 @@ class Reporter:
                 try:
                     event_data = json.loads(line)
                 except json.JSONDecodeError as ex:
-                    raise ReportError(f"Error parsing JSON in {perf_path}: {ex}")
+                    raise ProgramError(f"failed while parsing JSON in {perf_path} - {ex}")
 
                 event_name = event_data.get("event", "")
                 for key in requested_events:
@@ -187,7 +230,7 @@ class Reporter:
                 for bench_path in glob(bench_paths):
                     perfs = glob(os.path.join(bench_path, "perf.json"))
                     if not perfs:
-                        raise ReportError(f"No perf measurements found in {bench_path}")
+                        raise ProgramError(f"no perf measurements found in {bench_path}")
 
                     perf_data = self._parse_perf_file(perfs[0])
                     for event in self.REQUESTED_EVENTS:

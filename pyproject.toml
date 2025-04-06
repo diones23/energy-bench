@@ -1,7 +1,7 @@
 [project]
 name = "energy-bench"
 version = "0.1.0"
-description = ""
+description = "A novel LLM evaluation benchmark focusing on energy efficient and correct code generation"
 authors = [
     {name = "diones23",email = "diones23@student.aau.dk"}
 ]
@@ -17,6 +17,8 @@ dependencies = [
     "pandas (>=2.2.3,<3.0.0)",
 ]
 
+[project.scripts]
+energy-bench = "__main__:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
