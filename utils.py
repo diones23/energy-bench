@@ -38,7 +38,7 @@ def create_splash_screen(
         f"\033[1mENERGY-BENCH\033[0m (started {formatted_time})\n\n"
         f"\033[1mbenchmark   :\033[0m {bench_name} | \033[1mlanguage:\033[0m {lang_name} | \033[1mwarmup:\033[0m {'Yes' if warmup else 'No'} | \033[1miterations:\033[0m {iterations}\n"
         f"\033[1menvironment :\033[0m {env_name}\n"
-        f"\033[1mworkload:\033[0m {workload_name}"
+        f"\033[1mworkload    :\033[0m {workload_name}\n{env}"
     )
 
 

@@ -11,6 +11,7 @@ import os
 
 from errors import *
 from utils import *
+from workloads import Workload
 
 
 @dataclass
@@ -61,7 +62,7 @@ class Language(ABC):
 
     def __post_init__(self):
         if self.iterations < 1:
-            raise ProgramError("Iterations can't be lower than 1")
+            raise ProgramError("iterations can't be lower than 1")
 
         if not os.path.exists(self.benchmark_path):
             os.makedirs(self.benchmark_path)
@@ -90,9 +91,10 @@ class Language(ABC):
         self.clean()
         return False
 
-    def _ensure_results_dir(self, timestamp: float) -> str:
+    def _ensure_results_dir(self, workload: Workload, timestamp: float) -> str:
+        workload_str = workload.__class__.__name__
         warmup_dir = "warmup" if self.warmup else "no-warmup"
-        results_dir = f"results_{timestamp}"
+        results_dir = f"{workload_str}_{timestamp}"
         language_name = self.__class__.__name__
         results_dir = os.path.join(
             self.base_dir, results_dir, warmup_dir, language_name, self.benchmark.name
@@ -169,7 +171,7 @@ class Language(ABC):
 
     def _wrap_command(self, command: str, measuring: bool = False) -> list[str]:
         if not self.nix_deps:
-            raise ProgramError("Benchmark must specify at least one nix dependency")
+            raise ProgramError("benchmark must specify at least one nix dependency")
 
         if measuring:
             command = self._perf_wrapper(command)
@@ -196,22 +198,19 @@ class Language(ABC):
 
     def build(self) -> None:
         if not self.benchmark.code:
-            raise ProgramError("Benchmark doesn't have any source code")
+            raise ProgramError("benchmark doesn't have any source code")
 
         if not self.nix_deps:
-            raise ProgramError("Benchmark must specify at least one nix dependency")
+            raise ProgramError("benchmark must specify at least one nix dependency")
 
         write_file(self.benchmark.code, self.source_path)
         cmd = " ".join(self.build_command + self.benchmark.options)
         wrapped = self._wrap_command(cmd)
 
         try:
-            result = subprocess.run(args=wrapped, check=True, capture_output=True)
+            subprocess.run(args=wrapped, check=True, capture_output=True)
         except CalledProcessError as ex:
-            raise ProgramError(f"failed while building - {ex}")
-
-        if result.stderr:
-            raise ProgramError(result.stderr.decode())
+            raise ProgramError(f"failed while building - {ex.stderr}")
 
     def measure(self) -> None:
         cmd = " ".join(self.measure_command + self.benchmark.args)
@@ -222,14 +221,13 @@ class Language(ABC):
 
         try:
             with open(input_path, "rb") as infile, open(output_path, "wb") as outfile:
-                result = subprocess.run(
+                subprocess.run(
                     args=wrapped, check=True, stdout=outfile, stderr=subprocess.PIPE, stdin=infile
                 )
+        except CalledProcessError as ex:
+            raise ProgramError(f"failed while measuring - {ex.stderr}")
         except IOError as ex:
             raise ProgramError(f"failed while performing IO on measurement - {ex}")
-
-        if result.stderr:
-            raise ProgramError(result.stderr.decode())
 
     def verify(self, iterations: int) -> None:
         expected_path = os.path.join(self.benchmark_path, "expected")
@@ -260,17 +258,16 @@ class Language(ABC):
         try:
             cmd = " ".join(self.clean_command)
             wrapped = self._wrap_command(cmd)
-            result = subprocess.run(args=wrapped, check=True, capture_output=True)
+            subprocess.run(args=wrapped, check=True, capture_output=True)
 
             remove_files_if_exist(os.path.join(self.benchmark_path, "input"))
             remove_files_if_exist(os.path.join(self.benchmark_path, "expected"))
-
-            if result.stderr:
-                raise ProgramError(result.stderr.decode())
+        except CalledProcessError as ex:
+            raise ProgramError(f"failed to clean benchmark: {ex.stderr}")
         except IOError as ex:
             raise ProgramError(f"failed to clean benchmark: {ex}")
 
-    def move_rapl(self, timestamp: float) -> None:
+    def move_rapl(self, workload: Workload, timestamp: float) -> None:
         intel_rapls = glob(os.path.join(self.benchmark_path, "Intel_[0-9][0-9]*.csv"))
         amd_rapls = glob(os.path.join(self.benchmark_path, "AMD_[0-9][0-9]*.csv"))
         rapls = intel_rapls + amd_rapls
@@ -279,20 +276,20 @@ class Language(ABC):
         if len(rapls) > 1:
             raise ProgramError("found more than one rapl measurements")
 
-        results_dir = self._ensure_results_dir(timestamp)
+        results_dir = self._ensure_results_dir(workload, timestamp)
         try:
             shutil.move(rapls[0], results_dir)
         except IOError as ex:
             raise ProgramError(f"failed to move RAPL files - {ex}")
 
-    def move_perf(self, timestamp: float) -> None:
+    def move_perf(self, workload: Workload, timestamp: float) -> None:
         perfs = glob(os.path.join(self.benchmark_path, "perf.json"))
         if not perfs:
             raise ProgramError("benchmark didn't generate a valid perf measurement")
         if len(perfs) > 1:
             raise ProgramError("found more than one perf measurements")
 
-        results_dir = self._ensure_results_dir(timestamp)
+        results_dir = self._ensure_results_dir(workload, timestamp)
         try:
             shutil.move(perfs[0], results_dir)
         except IOError as ex:

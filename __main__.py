@@ -64,9 +64,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="perform measure iterations inside the benchmark",
     )
-    measure_parser.add_argument(
-        "--stop", action="store_true", help="stop after any failures"
-    )
+    measure_parser.add_argument("--stop", action="store_true", help="stop after any failures")
     measure_parser.add_argument(
         "--prod",
         action="store_true",
@@ -127,9 +125,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def measure_command(
-    base_dir: str, options: argparse.Namespace, yaml_paths: list[str]
-) -> int:
+def measure_command(base_dir: str, options: argparse.Namespace, yaml_paths: list[str]) -> int:
     errors = 0
 
     if options.lab:
@@ -141,7 +137,7 @@ def measure_command(
     else:
         env = Environment()
 
-    workloads = [Workload()]  # default workload doing nothing
+    workloads = ["workload"]
     if options.workloads:
         workloads = options.workloads
 
@@ -162,7 +158,7 @@ def measure_command(
     for path in yaml_paths:
         if not os.path.exists(path) or not is_yaml_file(path):
             errors += 1
-            print_error(f"'{path}' is not a yaml file or does not exist.")
+            print_error(f"'{path}' is not a yaml file or does not exist")
             if options.stop:
                 return errors
             continue
@@ -198,9 +194,7 @@ def measure_command(
     return errors
 
 
-def report_command(
-    base_dir: str, options: argparse.Namespace, results_path: str
-) -> int:
+def report_command(base_dir: str, options: argparse.Namespace, results_path: str) -> int:
     if not os.path.exists(results_path) or not os.path.isdir(results_path):
         print_error(f"'{results_path}' is not a directory or does not exist")
         return 1
@@ -228,9 +222,7 @@ def main() -> int:
 
     base_dir = os.path.join(os.path.expanduser("~"), ".energy-bench")
     if not os.path.exists(base_dir) or not os.path.isdir(base_dir):
-        print_error(
-            "base directory does not exist. Please install first with `make install`"
-        )
+        print_error("base directory does not exist. Please install first with `make install`")
         return 1
 
     file_paths = parse_input()

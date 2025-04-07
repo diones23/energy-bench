@@ -254,9 +254,8 @@ class Environment:
             min_freq_str = "unknown"
 
         return (
-            f"Platform  : {vendor} CPUs [{len(get_cpus("online"))} on] [{len(get_cpus("offline"))} off] [{min_freq_str}GHz-{max_freq_str}Ghz]\n"
-            f"Features  : Turbo [{boost_str}] Governor [{gov_str}]\n"
-            f"OS        : ASLR  [{aslr_str}]"
+            f"\033[1mplatform    :\033[0m {vendor} | \033[1mcpus:\033[0m [{len(get_cpus("online"))}/{len(get_cpus("offline"))} on/off] | \033[1mfreq:\033[0m {min_freq_str}GHz-{max_freq_str}Ghz\n"
+            f"\033[1mturbo       :\033[0m {boost_str} | \033[1mgovernor:\033[0m {gov_str} | \033[1maslr:\033[0m {aslr_str}\n"
         )
 
     def __enter__(self):

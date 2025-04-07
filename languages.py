@@ -4,22 +4,6 @@ import os
 
 from spec import Language
 
-"""
-All supported languages. Can be extended
-"""
-__all__ = [
-    "C",
-    "Cpp",
-    "CSharp",
-    "Java",
-    "GraalVm",
-    "OpenJdk",
-    "Semeru",
-    "JavaScript",
-    "Python",
-    "Rust",
-]
-
 
 @dataclass
 class C(Language):

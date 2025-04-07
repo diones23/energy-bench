@@ -6,16 +6,9 @@ from spec import Benchmark, Language
 from errors import ProgramError
 from environments import Environment
 from utils import *
-import languages
 from workloads import Workload
-
-
-def get_language_class_by_str(language_str: str) -> type[Language] | None:
-    available_languages = [getattr(languages, name) for name in languages.__all__]
-    for lang_cls in available_languages:
-        if hasattr(lang_cls, "aliases") and language_str.lower().strip() in lang_cls.aliases:
-            return lang_cls
-    return None
+import languages
+import workloads
 
 
 class Runner:
@@ -78,7 +71,7 @@ Note:
         self,
         yaml: dict,
         env: Environment,
-        workload: Workload,
+        workload_str: str,
         warmup: bool,
         iterations: int,
         frequency: int,
@@ -87,8 +80,13 @@ Note:
         if not language:
             return False
 
+        workload = self._get_workload_instance(workload_str)
+        if not workload:
+            print_error(f"{workload_str} not available")
+            return False
+
         try:
-            with language, env, workload:
+            with language, workload, env:  # Reversed order to make building more efficient
                 splash = create_splash_screen(
                     env, workload, language, warmup, iterations, frequency, timestamp=self.timestamp
                 )
@@ -103,8 +101,8 @@ Note:
                         language.measure()
                         language.verify(1)
 
-                language.move_rapl(self.timestamp)
-                language.move_perf(self.timestamp)
+                language.move_rapl(workload, self.timestamp)
+                language.move_perf(workload, self.timestamp)
         except ProgramError as ex:
             perf_path = os.path.join(language.benchmark_path, "perf.json")
             intel_path = os.path.join(language.benchmark_path, "Intel_[0-9][0-9]*.csv")
@@ -120,6 +118,28 @@ Note:
         print_success("Ok")
         print("")
         return True
+
+    def _all_subclasses(self, cls):
+        return cls.__subclasses__() + [
+            g for s in cls.__subclasses__() for g in self._all_subclasses(s)
+        ]
+
+    def _get_language_class_by_str(self, language_str: str) -> type[Language] | None:
+        language_str = language_str.lower().strip()
+        for subclass in self._all_subclasses(Language):
+            if hasattr(subclass, "aliases") and language_str in subclass.aliases:
+                return subclass
+        return None
+
+    def _get_workload_instance(self, workload_str: str) -> Workload | None:
+        workload_str = workload_str.lower().strip()
+        if workload_str == "workload":
+            return Workload()
+
+        for subclass in self._all_subclasses(Workload):
+            if subclass.__name__.lower() == workload_str:
+                return subclass()
+        return None
 
     def _setup(
         self,
@@ -139,7 +159,7 @@ Note:
         required_mappings.add("language")
         missing_keys = [key for key in required_mappings if key not in yaml]
         if missing_keys:
-            print_error(f"Benchmark missing required key(s): {', '.join(missing_keys)}")
+            print_error(f"benchmark missing required key(s) - {', '.join(missing_keys)}")
             return None
 
         filtered = {k: v for k, v in yaml.items() if k in all_mappings}
@@ -149,12 +169,12 @@ Note:
         try:
             benchmark = Benchmark(**filtered)
         except TypeError as ex:
-            print_error(f"Error building benchmark: {ex}")
+            print_error(f"failed initializing benchmark - {ex}")
             return None
 
         # Build Language
         lang_str = yaml["language"]
-        lang_cls = get_language_class_by_str(lang_str)
+        lang_cls = self._get_language_class_by_str(lang_str)
         if not lang_cls:
             print_error(f"{lang_str} not available")
             return None
@@ -174,5 +194,5 @@ Note:
             )
             return language
         except TypeError as ex:
-            print_error(f"Error creating language object: {ex}")
+            print_error(f"failed initializing language - {ex}")
             return None
