@@ -1,0 +1,22 @@
+language: c
+name: trial-run
+dependencies:
+    - gcc
+options:
+    - -pipe
+    - -O3
+    - -march=native
+    - -fomit-frame-pointer
+code: |
+    #include <unistd.h>
+    #include <rapl_interface.h>
+
+    int main()
+    {
+        while (start_rapl())
+        {
+            sleep(10);
+            stop_rapl();
+        }
+        return 0;
+    }

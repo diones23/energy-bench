@@ -99,7 +99,7 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/bi
             }
         }
     }
-nix_deps:
+dependencies:
     - dotnet-sdk_9
 options:
     - -c Release

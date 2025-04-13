@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from ollama import chat, ChatResponse
 from abc import ABC, abstractmethod
 from subprocess import CalledProcessError
-from typing import ClassVar, Any
+from typing import Any, ClassVar
 from glob import glob
 import shutil
 import json
@@ -15,71 +15,54 @@ from workloads import Workload
 
 
 @dataclass
-class Benchmark:
-    """
-    Represents a benchmark with its configuration and expected outputs.
-    """
-
+class Specification(ABC):
     name: str
-    description: str | None = None
+    language: str
+    dependencies: list[str]
+    target: str = ""
+    source: str = ""
+    rapl_usage: str = ""
+    description: str = ""
     options: list[str] = field(default_factory=list)
-    code: str | None = None
+    code: str = ""
     args: list[str] = field(default_factory=list)
     stdin: str | bytes = ""
     expected_stdout: str | bytes = ""
 
 
 @dataclass
-class Language(ABC):
-    """
-    Generic data class responsible for building, measuring and cleaning
-    benchmarks implemented in a specific language.
-    """
-
-    # Base Dependencies
-    base_dir: str
-    benchmark: Benchmark
-
-    # Language Specifics
-    aliases: ClassVar[list[str]]
-    target: str
-    source: str
-
-    # Nix Environment
-    nix_deps: list[str] = field(default_factory=list)
-    nix_commit: str = (
-        "https://github.com/NixOS/nixpkgs/archive/52e3095f6d812b91b22fb7ad0bfc1ab416453634.tar.gz"
-    )
-
-    # RAPL Interface
-    rapl_usage: str = ""
-
-    # Configuration with Defaults
+class Implementation(Specification):
+    aliases: ClassVar[list[str]] = []
+    base_dir: str = ""
     warmup: bool = False
     iterations: int = 1
     frequency: int = 500
-    niceness: int | None = None
+    niceness: int = 0
+    commit: str = (
+        "https://github.com/NixOS/nixpkgs/archive/52e3095f6d812b91b22fb7ad0bfc1ab416453634.tar.gz"
+    )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if " " in self.name:
+            raise ProgramError("benchmark name must not have any spaces")
+
         if self.iterations < 1:
             raise ProgramError("iterations can't be lower than 1")
+
+        if self.frequency < 500:
+            raise ProgramError("frequency can't be lower than 500")
+
+        if self.niceness and not self.niceness in range(-20, 20):
+            raise ProgramError("niceness must be within this range [-20, 19]")
 
         if not os.path.exists(self.benchmark_path):
             os.makedirs(self.benchmark_path)
 
         # Offload large data to disk and discard the in-memory copy.
-        write_file(self.benchmark.stdin, os.path.join(self.benchmark_path, "input"))
-        write_file(self.benchmark.expected_stdout, os.path.join(self.benchmark_path, "expected"))
-        self.benchmark.stdin = ""
-        self.benchmark.expected_stdout = ""
-
-    def __str__(self) -> str:
-        warmup_str = "warmup" if self.warmup else "no-warmup"
-        lang_str = self.__class__.__name__
-        return (
-            f"Benchmark : [{lang_str} {self.benchmark.name}] [{warmup_str}] [{self.iterations} iters]\n"
-            f"            [nice {self.niceness}] [perf {self.frequency}/s]\n"
-        )
+        write_file(self.stdin, os.path.join(self.benchmark_path, "input"))
+        write_file(self.expected_stdout, os.path.join(self.benchmark_path, "expected"))
+        self.stdin = ""
+        self.expected_stdout = ""
 
     def __enter__(self):
         self.build()
@@ -92,13 +75,11 @@ class Language(ABC):
         return False
 
     def _ensure_results_dir(self, workload: Workload, timestamp: float) -> str:
-        workload_str = workload.__class__.__name__
+        workload_str = workload.__class__.__name__.lower()
         warmup_dir = "warmup" if self.warmup else "no-warmup"
         results_dir = f"{workload_str}_{timestamp}"
         language_name = self.__class__.__name__
-        results_dir = os.path.join(
-            self.base_dir, results_dir, warmup_dir, language_name, self.benchmark.name
-        )
+        results_dir = os.path.join(self.base_dir, results_dir, warmup_dir, language_name, self.name)
         os.makedirs(results_dir, exist_ok=True)
         return results_dir
 
@@ -130,9 +111,7 @@ class Language(ABC):
 
         try:
             result = subprocess.run(
-                args=["perf", "list", "--json", "--no-desc"],
-                check=True,
-                capture_output=True,
+                args=["perf", "list", "--json", "--no-desc"], check=True, capture_output=True
             )
             available_events = iter(json.loads(result.stdout))
 
@@ -154,23 +133,21 @@ class Language(ABC):
     def _perf_wrapper(self, command: str) -> str:
         events = self._get_available_perf_events()
         perf_path = os.path.join(self.benchmark_path, "perf.json")
-        perf_command = f"perf stat --all-cpus -I {self.frequency} --json --output {perf_path} -e {','.join(events)}"
+        perf_command = f"perf stat --all-cpus --append -I {self.frequency} --json --output {perf_path} -e {','.join(events)}"
         return f"{perf_command} {command}"
 
     def _nice_wrapper(self, command: str) -> str:
-        if self.niceness:
-            return f"nice -n {self.niceness} {command}"
-        return command
+        return f"nice -n {self.niceness} {command}"
 
     def _nix_wrapper(self, command: str) -> list[str]:
         return (
             ["nix-shell", "--no-build-output", "--quiet", "--packages"]
-            + self.nix_deps
-            + ["-I", f"nixpkgs={self.nix_commit}", "--run", command]
+            + self.dependencies
+            + ["-I", f"nixpkgs={self.commit}", "--run", command]
         )
 
     def _wrap_command(self, command: str, measuring: bool = False) -> list[str]:
-        if not self.nix_deps:
+        if not self.dependencies:
             raise ProgramError("benchmark must specify at least one nix dependency")
 
         if measuring:
@@ -186,7 +163,7 @@ class Language(ABC):
     @property
     def benchmark_path(self) -> str:
         lang_name = self.__class__.__name__
-        return os.path.join(self.base_dir, lang_name, self.benchmark.name)
+        return os.path.join(self.base_dir, lang_name, self.name)
 
     @property
     def target_path(self) -> str:
@@ -197,14 +174,14 @@ class Language(ABC):
         return os.path.join(self.benchmark_path, self.source)
 
     def build(self) -> None:
-        if not self.benchmark.code:
+        if not self.code:
             raise ProgramError("benchmark doesn't have any source code")
 
-        if not self.nix_deps:
+        if not self.dependencies:
             raise ProgramError("benchmark must specify at least one nix dependency")
 
-        write_file(self.benchmark.code, self.source_path)
-        cmd = " ".join(self.build_command + self.benchmark.options)
+        write_file(self.code, self.source_path)
+        cmd = " ".join(self.build_command + self.options)
         wrapped = self._wrap_command(cmd)
 
         try:
@@ -213,7 +190,7 @@ class Language(ABC):
             raise ProgramError(f"failed while building - {ex.stderr}")
 
     def measure(self) -> None:
-        cmd = " ".join(self.measure_command + self.benchmark.args)
+        cmd = " ".join(self.measure_command + self.args)
         wrapped = self._wrap_command(cmd, measuring=True)
 
         input_path = os.path.join(self.benchmark_path, "input")

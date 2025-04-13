@@ -1,4 +1,4 @@
-language: java
+language: graalvm
 name: spectral-norm
 code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/spectralnorm-javavm-3.html
     /*
@@ -95,7 +95,7 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/sp
             }
         }
     }
-nix_deps:
+dependencies:
     - graalvm-ce
 args: [5500]
 expected_stdout: |

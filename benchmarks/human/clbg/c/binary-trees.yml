@@ -156,7 +156,7 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/bi
         }
         return 0;
     }
-nix_deps:
+dependencies:
     - gcc
 options:
     - -pipe

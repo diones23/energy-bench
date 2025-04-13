@@ -1,12 +1,12 @@
-from dataclasses import fields, MISSING
-from datetime import datetime, timezone
+from dataclasses import MISSING, fields
+import time
 import os
 
-from spec import Benchmark, Language
-from errors import ProgramError
+from spec import Implementation, Specification
 from environments import Environment
-from utils import *
 from workloads import Workload
+from errors import ProgramError
+from utils import *
 import languages
 import workloads
 
@@ -63,136 +63,117 @@ Note:
 - The start_rapl() library function reads the RAPL_ITERATIONS environment variable internally and returns an integer denoting how many iterations remain.
     """
 
-    def __init__(self, base_dir: str) -> None:
+    def __init__(
+        self, base_dir: str, env: Environment, workload: Workload, timestamp: float
+    ) -> None:
         self.base_dir = base_dir
-        self.timestamp = datetime.now(timezone.utc).timestamp()
+        self.env = env
+        self.workload = workload
+        self.timestamp = timestamp
 
     def run_benchmark(
-        self,
-        yaml: dict,
-        env: Environment,
-        workload_str: str,
-        warmup: bool,
-        iterations: int,
-        frequency: int,
+        self, data: dict, warmup: bool, iterations: int, sleep: int, frequency: int, niceness: int
     ) -> bool:
-        language = self._setup(yaml, env, warmup, iterations, frequency)
-        if not language:
-            return False
-
-        workload = self._get_workload_instance(workload_str)
-        if not workload:
-            print_error(f"{workload_str} not available")
+        imp = self._build_language(data, warmup, iterations, frequency, niceness)
+        if not imp:
             return False
 
         try:
-            with language, workload, env:  # Reversed order to make building more efficient
-                splash = create_splash_screen(
-                    env, workload, language, warmup, iterations, frequency, timestamp=self.timestamp
-                )
+            # Reversed order to make building & cleaning more efficient
+            with imp, self.workload, self.env:
+                splash = self._splash_screen(imp, warmup, iterations, sleep, frequency)
                 print(splash)
-                print("")
 
                 if warmup:
-                    language.measure()
-                    language.verify(iterations)
+                    imp.measure()
+                    imp.verify(iterations)
                 else:
                     for _ in range(iterations):
-                        language.measure()
-                        language.verify(1)
+                        imp.measure()
+                        imp.verify(1)
 
-                language.move_rapl(workload, self.timestamp)
-                language.move_perf(workload, self.timestamp)
+            imp.move_rapl(self.workload, self.timestamp)
+            imp.move_perf(self.workload, self.timestamp)
+
+            print_success("ok")
+            if sleep:
+                print_info(f"sleeping for {sleep} seconds")
+                time.sleep(sleep)
         except ProgramError as ex:
-            perf_path = os.path.join(language.benchmark_path, "perf.json")
-            intel_path = os.path.join(language.benchmark_path, "Intel_[0-9][0-9]*.csv")
-            amd_path = os.path.join(language.benchmark_path, "AMD_[0-9][0-9]*.csv")
-            remove_files_if_exist(perf_path)
-            remove_files_if_exist(intel_path)
-            remove_files_if_exist(amd_path)
+            self._cleanup(imp)
             print_error(str(ex))
             return False
         except KeyboardInterrupt as ex:
-            print_error("Manually exited")
+            print_warning("manually exited")
             return False
-        print_success("Ok")
-        print("")
         return True
 
-    def _all_subclasses(self, cls):
-        return cls.__subclasses__() + [
-            g for s in cls.__subclasses__() for g in self._all_subclasses(s)
-        ]
+    def _cleanup(self, imp: Implementation) -> None:
+        perf_path = os.path.join(imp.benchmark_path, "perf.json")
+        intel_path = os.path.join(imp.benchmark_path, "Intel_[0-9][0-9]*.csv")
+        amd_path = os.path.join(imp.benchmark_path, "AMD_[0-9][0-9]*.csv")
+        remove_files_if_exist(perf_path)
+        remove_files_if_exist(intel_path)
+        remove_files_if_exist(amd_path)
 
-    def _get_language_class_by_str(self, language_str: str) -> type[Language] | None:
-        language_str = language_str.lower().strip()
-        for subclass in self._all_subclasses(Language):
-            if hasattr(subclass, "aliases") and language_str in subclass.aliases:
-                return subclass
+    def _get_lang_cls(self, language_str: str) -> type[Implementation] | None:
+        lstr = language_str.lower().strip()
+        for cls in all_subclasses(Implementation):
+            if hasattr(cls, "aliases") and lstr in cls.aliases:
+                return cls
         return None
 
-    def _get_workload_instance(self, workload_str: str) -> Workload | None:
-        workload_str = workload_str.lower().strip()
-        if workload_str == "workload":
-            return Workload()
+    def _splash_screen(
+        self, spec, warmup: bool, iterations: int, sleep: int, frequency: int
+    ) -> str:
+        estr = self.env.__class__.__name__.lower()
+        wstr = self.workload.__class__.__name__.lower()
 
-        for subclass in self._all_subclasses(Workload):
-            if subclass.__name__.lower() == workload_str:
-                return subclass()
-        return None
+        if estr == "environment":
+            estr = None
 
-    def _setup(
-        self,
-        yaml: dict,
-        env: Environment,
-        warmup: bool,
-        iterations: int,
-        frequency: int,
-    ) -> Language | None:
-        # Build Benchmark
-        all_mappings = {f.name for f in fields(Benchmark)}
-        required_mappings = {
+        if wstr == "workload":
+            wstr = None
+
+        return (
+            f"\033[1mbenchmark   :\033[0m {spec.name} | \033[1mlanguage:\033[0m {spec.language} | \033[1mwarmup:\033[0m {'Yes' if warmup else 'No'} | \033[1miterations:\033[0m {iterations} | \033[1mperf freq:\033[0m {frequency}ms | \033[1msleep:\033[0m {sleep}s\n"
+            f"\033[1menvironment :\033[0m {estr} | \033[1mworkload:\033[0m {wstr}\n"
+            f"{self.env}"
+        )
+
+    def _build_language(
+        self, yaml: dict, warmup: bool, iterations: int, frequency: int, niceness: int
+    ) -> Implementation | None:
+        spec_map = {f.name for f in fields(Specification)}
+        required_map = {
             f.name
-            for f in fields(Benchmark)
+            for f in fields(Specification)
             if f.default is MISSING and f.default_factory is MISSING
         }
-        required_mappings.add("language")
-        missing_keys = [key for key in required_mappings if key not in yaml]
-        if missing_keys:
-            print_error(f"benchmark missing required key(s) - {', '.join(missing_keys)}")
+        missing = [key for key in required_map if key not in yaml]
+        if missing:
+            print_error(f"benchmark missing required key(s) - {', '.join(missing)}")
             return None
 
-        filtered = {k: v for k, v in yaml.items() if k in all_mappings}
+        filtered = {k: v for k, v in yaml.items() if k in spec_map}
         if "args" in filtered and filtered["args"]:
             filtered["args"] = [str(arg) for arg in filtered["args"]]
 
-        try:
-            benchmark = Benchmark(**filtered)
-        except TypeError as ex:
-            print_error(f"failed initializing benchmark - {ex}")
+        lstr = filtered["language"]
+        lcls = self._get_lang_cls(lstr)
+        if not lcls:
+            print_error(f"{lstr} not available")
             return None
 
-        # Build Language
-        lang_str = yaml["language"]
-        lang_cls = self._get_language_class_by_str(lang_str)
-        if not lang_cls:
-            print_error(f"{lang_str} not available")
-            return None
-
-        all_mappings = {f.name for f in fields(lang_cls)}
-        filtered = {k: v for k, v in yaml.items() if k in all_mappings}
-
         try:
-            language = lang_cls(
+            return lcls(
                 base_dir=self.base_dir,
-                benchmark=benchmark,
                 warmup=warmup,
                 iterations=iterations,
                 frequency=frequency,
-                niceness=env.niceness,
+                niceness=niceness,
                 **filtered,
             )
-            return language
         except TypeError as ex:
-            print_error(f"failed initializing language - {ex}")
+            print_error(f"failed initializing specification - {ex}")
             return None

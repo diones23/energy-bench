@@ -1,4 +1,4 @@
-language: java
+language: openjdk
 name: n-body
 code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-graalvmaot-4.html
     /* The Computer Language Benchmarks Game
@@ -189,7 +189,7 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nb
           return this;
        }
     }
-nix_deps:
+dependencies:
     - jdk23
 args: [50000000]
 expected_stdout: |

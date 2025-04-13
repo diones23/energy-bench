@@ -2,11 +2,11 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 import os
 
-from spec import Language
+from spec import Implementation
 
 
 @dataclass
-class C(Language):
+class C(Implementation):
     aliases: ClassVar[list[str]] = ["c"]
     target: str = "main"
     source: str = "main.c"
@@ -30,14 +30,7 @@ class C(Language):
 
     @property
     def build_command(self) -> list[str]:
-        return [
-            "gcc",
-            self.source_path,
-            "-o",
-            self.target_path,
-            "-w",
-            "-lrapl_interface",
-        ]
+        return ["gcc", self.source_path, "-o", self.target_path, "-w", "-lrapl_interface"]
 
     @property
     def measure_command(self) -> list[str]:
@@ -55,18 +48,11 @@ class Cpp(C):
 
     @property
     def build_command(self) -> list[str]:
-        return [
-            "g++",
-            self.source_path,
-            "-o",
-            self.target_path,
-            "-w",
-            "-lrapl_interface",
-        ]
+        return ["g++", self.source_path, "-o", self.target_path, "-w", "-lrapl_interface"]
 
 
 @dataclass
-class CSharp(Language):
+class CSharp(Implementation):
     # C# specific
     packages: list[dict] = field(default_factory=list)
 
@@ -90,10 +76,7 @@ class CSharp(Language):
 
     @property
     def measure_command(self) -> list[str]:
-        return [
-            "env DOTNET_ROOT=$(dirname $(readlink -f $(which dotnet)))",
-            self.target_path,
-        ]
+        return ["env DOTNET_ROOT=$(dirname $(readlink -f $(which dotnet)))", self.target_path]
 
     @property
     def clean_command(self) -> list[str]:
@@ -119,7 +102,7 @@ class CSharp(Language):
 
 
 @dataclass
-class Java(Language):
+class Java(Implementation):
     # Java specific
     class_paths: list[str] = field(default_factory=list)
     roptions: list[str] = field(default_factory=list)
@@ -136,13 +119,7 @@ class Java(Language):
 
     @property
     def build_command(self) -> list[str]:
-        return [
-            "javac",
-            "-nowarn",
-            f"-d {self.benchmark_path}",
-            self._cp_flag,
-            self.source_path,
-        ]
+        return ["javac", "-nowarn", f"-d {self.benchmark_path}", self._cp_flag, self.source_path]
 
     @property
     def measure_command(self) -> list[str]:
@@ -176,18 +153,18 @@ class Semeru(Java):
 
 
 @dataclass
-class JavaScript(Language):
+class JavaScript(Implementation):
     # Generic
     aliases: ClassVar[list[str]] = ["javascript", "js"]
 
 
 @dataclass
-class Python(Language):
+class Python(Implementation):
     # Generic
     aliases: ClassVar[list[str]] = ["python", "py"]
 
 
 @dataclass
-class Rust(Language):
+class Rust(Implementation):
     # Generic
     aliases: ClassVar[list[str]] = ["rust", "rs"]

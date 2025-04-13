@@ -1,4 +1,4 @@
-language: java
+language: openjdk
 name: fannkuch-redux
 code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/fannkuchredux-graalvmaot-1.html
     /*
@@ -192,7 +192,7 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/fa
             }
         }
     }
-nix_deps:
+dependencies:
     - jdk23
 args: [12]
 expected_stdout: |

@@ -15,6 +15,9 @@ class Workload:
     def __exit__(self, exc_type, exc_value, traceback):
         return False
 
+    def __str__(self) -> str:
+        return self.__class__.__name__.lower()
+
 
 class Librewolf(Workload):
     def __enter__(self):
@@ -45,7 +48,7 @@ class Librewolf(Workload):
     def _open_sites_command(self, display: int = 99) -> str:
         urls = [
             "https://www.youtube.com/watch?v=xm3YgoEiEDc",
-            "https://www.google.com",
+            "https://www.google.com/",
             "https://open.spotify.com/",
             "https://www.amazon.com/",
         ]
@@ -53,11 +56,11 @@ class Librewolf(Workload):
         return "& ".join([f"librewolf --new-tab --display=:{display} '{url}'" for url in urls])
 
     def _nix_wrapper(self, command: str) -> list[str]:
-        nix_deps = ["librewolf", "xorg.xvfb"]
+        dependencies = ["librewolf", "xorg.xvfb"]
         nix_commit = "https://github.com/NixOS/nixpkgs/archive/52e3095f6d812b91b22fb7ad0bfc1ab416453634.tar.gz"
 
         return (
             ["nix-shell", "--no-build-output", "--quiet", "--packages"]
-            + nix_deps
+            + dependencies
             + ["-I", f"nixpkgs={nix_commit}", "--run", command]
         )

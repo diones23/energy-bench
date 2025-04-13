@@ -168,8 +168,6 @@ def set_intel_boost(enable: bool) -> None:
 class Environment:
     """Controls Linux-specific OS environment"""
 
-    niceness: int | None = None
-
     def record_original(self):
         self._orig_aslr = get_aslr()
         if get_cpu_vendor() == "intel":
@@ -254,7 +252,7 @@ class Environment:
             min_freq_str = "unknown"
 
         return (
-            f"\033[1mplatform    :\033[0m {vendor} | \033[1mcpus:\033[0m [{len(get_cpus("online"))}/{len(get_cpus("offline"))} on/off] | \033[1mfreq:\033[0m {min_freq_str}GHz-{max_freq_str}Ghz\n"
+            f"\033[1mplatform    :\033[0m {vendor} | \033[1mcpus on/off:\033[0m {len(get_cpus("online"))}/{len(get_cpus("offline"))} | \033[1mcpus freq:\033[0m {min_freq_str}GHz-{max_freq_str}Ghz\n"
             f"\033[1mturbo       :\033[0m {boost_str} | \033[1mgovernor:\033[0m {gov_str} | \033[1maslr:\033[0m {aslr_str}\n"
         )
 
@@ -291,8 +289,6 @@ class Lightweight(Environment):
 
 @dataclass
 class Lab(Environment):
-    niceness: int | None = -20
-
     def enter(self) -> None:
         set_aslr(0) # Enable ASLR
 

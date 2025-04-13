@@ -1,45 +1,25 @@
+from datetime import datetime, timezone
 from glob import glob
 import subprocess
 import os
-from datetime import datetime, timezone
 
 from errors import ProgramError
 
 
 def print_error(msg: str) -> None:
-    print(f"\033[31mError:\033[0m {msg}.")
+    print(f"\033[31mError:\033[0m {msg}.\n")
 
 
 def print_success(msg: str) -> None:
-    print(f"\033[32m{msg}\033[0m")
+    print(f"\033[32m{msg}.\033[0m\n")
 
 
 def print_info(msg: str) -> None:
-    print(f"\033[34mInfo:\033[0m {msg}.")
+    print(f"\033[34mInfo:\033[0m {msg}.\n")
 
 
 def print_warning(msg: str) -> None:
-    print(f"\033[33mWarning:\033[0m {msg}.")
-
-
-def create_splash_screen(
-    env, workload, language, warmup: bool, iterations: int, frequency: int, timestamp: float
-) -> str:
-    env_name = env.__class__.__name__
-    workload_name = workload.__class__.__name__
-    lang_name = language.__class__.__name__
-    bench_name = language.benchmark.name
-
-    formatted_time = datetime.fromtimestamp(timestamp, timezone.utc).strftime(
-        "%d-%m-%Y %H:%M:%S UTC"
-    )
-
-    return (
-        f"\033[1mENERGY-BENCH\033[0m (started {formatted_time})\n\n"
-        f"\033[1mbenchmark   :\033[0m {bench_name} | \033[1mlanguage:\033[0m {lang_name} | \033[1mwarmup:\033[0m {'Yes' if warmup else 'No'} | \033[1miterations:\033[0m {iterations}\n"
-        f"\033[1menvironment :\033[0m {env_name}\n"
-        f"\033[1mworkload    :\033[0m {workload_name}\n{env}"
-    )
+    print(f"\033[33mWarning:\033[0m {msg}.\n")
 
 
 def remove_files_if_exist(path) -> None:
@@ -47,6 +27,21 @@ def remove_files_if_exist(path) -> None:
     for file in files:
         if os.path.exists(file):
             os.remove(file)
+
+
+def all_subclasses(cls):
+    return cls.__subclasses__() + [g for s in cls.__subclasses__() for g in all_subclasses(s)]
+
+
+def format_time(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%d-%m-%Y %H:%M:%S UTC")
+
+
+def elapsed_time(seconds: float) -> str:
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    return f"{int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}"
 
 
 def is_yaml_file(file_path: str) -> bool:

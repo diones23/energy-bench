@@ -1,4 +1,4 @@
-language: java
+language: openjdk
 name: binary-trees
 code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-graalvmaot-7.html
     /**
@@ -101,7 +101,7 @@ code: | # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/bi
             }
         }
     }
-nix_deps:
+dependencies:
     - jdk23
 args: [21]
 expected_stdout: |

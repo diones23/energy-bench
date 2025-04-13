@@ -26,15 +26,12 @@ install: $(RAPL_SO)
 	install -m 644 $(RAPL_JNI) $(BASE_DIR)
 	
 	# Install Python files
-	cp -r __main__.py $(BASE_DIR)
-	cp -r environments.py $(BASE_DIR)
-	cp -r errors.py $(BASE_DIR)
-	cp -r languages.py $(BASE_DIR)
-	cp -r reporter.py $(BASE_DIR)
-	cp -r runner.py $(BASE_DIR)
-	cp -r spec.py $(BASE_DIR)
-	cp -r workloads.py $(BASE_DIR)
-	cp -r utils.py $(BASE_DIR)
+	for file in $(wildcard *.py); do \
+		install -m 644 $$file $(BASE_DIR); \
+	done
+
+	# Install trial run
+	install -m 644 trial-run.yml $(BASE_DIR)
 	
 	# Create launcher script
 	echo '#!/bin/sh' > $(BIN_DIR)/$(NAME)
