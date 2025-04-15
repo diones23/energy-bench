@@ -1,8 +1,17 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar
 import os
 
 from spec import Implementation
+from utils import *
+
+
+def get_impl_cls(impl_str: str) -> type[Implementation]:
+    istr = impl_str.lower().strip()
+    for cls in all_subclasses(Implementation):
+        if hasattr(cls, "aliases") and istr in cls.aliases:
+            return cls
+    raise ProgramError(f"{impl_str} not a known implementation")
 
 
 @dataclass
@@ -10,23 +19,14 @@ class C(Implementation):
     aliases: ClassVar[list[str]] = ["c"]
     target: str = "main"
     source: str = "main.c"
-    rapl_usage: str = """
-        #include <rapl_interface.h>
-        // initialize method definition
-        // run_benchmark method definition
-        // cleanup method definition
-        // ... rest of the code
-        int main() {
-            while (1) {
-                // initialize method call
-                if (start_rapl() == 0) break;
-                // run_benchmark method call
-                stop_rapl();
-                // cleanup method call
-            }
-            return 0;
-        }
-    """
+    rapl_usage: str = """#include <rapl_interface.h>
+int main(int argc, char **argv) {
+    while (start_rapl()) {
+        run_benchmark(argv)
+        stop_rapl();
+    }
+    return 0;
+}"""
 
     @property
     def build_command(self) -> list[str]:
@@ -53,14 +53,23 @@ class Cpp(C):
 
 @dataclass
 class CSharp(Implementation):
-    # C# specific
-    packages: list[dict] = field(default_factory=list)
-
     aliases: ClassVar[list[str]] = ["c#", "cs", "csharp"]
     target: str = os.path.join("bin", "Release", "net*", "program")
     source: str = "Program.cs"
-    rapl_usage: str = """
-    """
+    rapl_usage: str = """using System.Runtime.InteropServices;
+class Program {
+    [DllImport("librapl_interface", EntryPoint = "start_rapl")]
+    private static extern bool start_rapl();
+
+    [DllImport("librapl_interface", EntryPoint = "stop_rapl")]
+    private static extern void stop_rapl();
+    public static void Main(string[] args) {
+        while (start_rapl()) {
+            run_benchmark(args);
+            stop_rapl();
+        }
+    }
+}"""
 
     @property
     def build_command(self) -> list[str]:
@@ -103,10 +112,6 @@ class CSharp(Implementation):
 
 @dataclass
 class Java(Implementation):
-    # Java specific
-    class_paths: list[str] = field(default_factory=list)
-    roptions: list[str] = field(default_factory=list)
-
     aliases: ClassVar[list[str]] = ["java"]
     target: str = "Program"
     source: str = "Program.java"

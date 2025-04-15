@@ -1,17 +1,46 @@
-from dataclasses import dataclass, field
-from ollama import chat, ChatResponse
-from abc import ABC, abstractmethod
 from subprocess import CalledProcessError
+from dataclasses import MISSING, dataclass, field, fields
+from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 from glob import glob
+import subprocess
 import shutil
 import json
-import subprocess
 import os
 
-from errors import *
+from setups.environments import Environment
+from setups.workloads import Workload
 from utils import *
-from workloads import Workload
+
+
+def validate_data(data: dict) -> dict:
+    spec_map = {f.name for f in fields(Specification)}
+    required_map = {
+        f.name
+        for f in fields(Specification)
+        if f.default is MISSING and f.default_factory is MISSING
+    }
+    missing = [key for key in required_map if key not in data]
+    if missing:
+        raise ProgramError(f"benchmark missing required key(s) - {', '.join(missing)}")
+
+    validated = {k: v for k, v in data.items() if k in spec_map}
+    if "args" in validated and validated["args"]:
+        validated["args"] = [str(arg) for arg in validated["args"]]
+
+    if "stdin" in validated:
+        if isinstance(validated["stdin"], str):
+            validated["stdin"] = validated["stdin"].encode("utf-8")
+        elif not isinstance(validated["stdin"], bytes):
+            raise ProgramError("stdin must be a string or bytes")
+
+    if "expected_stdout" in validated:
+        if isinstance(validated["expected_stdout"], str):
+            validated["expected_stdout"] = validated["expected_stdout"].encode("utf-8")
+        elif not isinstance(validated["expected_stdout"], bytes):
+            raise ProgramError("expected_stdout must be a string or bytes")
+
+    return validated
 
 
 @dataclass
@@ -26,8 +55,15 @@ class Specification(ABC):
     options: list[str] = field(default_factory=list)
     code: str = ""
     args: list[str] = field(default_factory=list)
-    stdin: str | bytes = ""
-    expected_stdout: str | bytes = ""
+    stdin: bytes = b""
+    expected_stdout: bytes = b""
+
+    # C# Specific
+    packages: list[dict] = field(default_factory=list)
+
+    # Java Specific
+    class_paths: list[str] = field(default_factory=list)
+    roptions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -55,16 +91,13 @@ class Implementation(Specification):
         if self.niceness and not self.niceness in range(-20, 20):
             raise ProgramError("niceness must be within this range [-20, 19]")
 
-        if not os.path.exists(self.benchmark_path):
-            os.makedirs(self.benchmark_path)
-
+    def __enter__(self):
         # Offload large data to disk and discard the in-memory copy.
+        os.makedirs(self.benchmark_path, exist_ok=True)
         write_file(self.stdin, os.path.join(self.benchmark_path, "input"))
         write_file(self.expected_stdout, os.path.join(self.benchmark_path, "expected"))
-        self.stdin = ""
-        self.expected_stdout = ""
-
-    def __enter__(self):
+        self.stdin = b""
+        self.expected_stdout = b""
         self.build()
         return self
 
@@ -74,12 +107,24 @@ class Implementation(Specification):
         self.clean()
         return False
 
-    def _ensure_results_dir(self, workload: Workload, timestamp: float) -> str:
-        workload_str = workload.__class__.__name__.lower()
+    def _ensure_results_dir(self, workload: Workload, env: Environment, timestamp: float) -> str:
+        estr = env.__class__.__name__.lower()
+        wstr = workload.__class__.__name__.lower()
+
+        results_dir = timestamp
+        if wstr == "workload":
+            results_dir = f"none_{results_dir}"
+        else:
+            results_dir = f"{wstr}_{results_dir}"
+
+        if estr == "environment":
+            results_dir = f"none_{results_dir}"
+        else:
+            results_dir = f"{estr}_{results_dir}"
+
         warmup_dir = "warmup" if self.warmup else "no-warmup"
-        results_dir = f"{workload_str}_{timestamp}"
-        language_name = self.__class__.__name__
-        results_dir = os.path.join(self.base_dir, results_dir, warmup_dir, language_name, self.name)
+        istr = self.__class__.__name__
+        results_dir = os.path.join(self.base_dir, results_dir, warmup_dir, istr, self.name)
         os.makedirs(results_dir, exist_ok=True)
         return results_dir
 
@@ -187,7 +232,9 @@ class Implementation(Specification):
         try:
             subprocess.run(args=wrapped, check=True, capture_output=True)
         except CalledProcessError as ex:
-            raise ProgramError(f"failed while building - {ex.stderr}")
+            raise ProgramError(
+                f"returned non-zero exit status {ex.returncode} while building - {ex.stderr}"
+            )
 
     def measure(self) -> None:
         cmd = " ".join(self.measure_command + self.args)
@@ -236,15 +283,15 @@ class Implementation(Specification):
             cmd = " ".join(self.clean_command)
             wrapped = self._wrap_command(cmd)
             subprocess.run(args=wrapped, check=True, capture_output=True)
-
-            remove_files_if_exist(os.path.join(self.benchmark_path, "input"))
-            remove_files_if_exist(os.path.join(self.benchmark_path, "expected"))
         except CalledProcessError as ex:
             raise ProgramError(f"failed to clean benchmark: {ex.stderr}")
         except IOError as ex:
             raise ProgramError(f"failed to clean benchmark: {ex}")
+        finally:
+            remove_files_if_exist(os.path.join(self.benchmark_path, "input"))
+            remove_files_if_exist(os.path.join(self.benchmark_path, "expected"))
 
-    def move_rapl(self, workload: Workload, timestamp: float) -> None:
+    def move_rapl(self, workload: Workload, env: Environment, timestamp: float) -> None:
         intel_rapls = glob(os.path.join(self.benchmark_path, "Intel_[0-9][0-9]*.csv"))
         amd_rapls = glob(os.path.join(self.benchmark_path, "AMD_[0-9][0-9]*.csv"))
         rapls = intel_rapls + amd_rapls
@@ -253,20 +300,20 @@ class Implementation(Specification):
         if len(rapls) > 1:
             raise ProgramError("found more than one rapl measurements")
 
-        results_dir = self._ensure_results_dir(workload, timestamp)
+        results_dir = self._ensure_results_dir(workload, env, timestamp)
         try:
             shutil.move(rapls[0], results_dir)
         except IOError as ex:
             raise ProgramError(f"failed to move RAPL files - {ex}")
 
-    def move_perf(self, workload: Workload, timestamp: float) -> None:
+    def move_perf(self, workload: Workload, env: Environment, timestamp: float) -> None:
         perfs = glob(os.path.join(self.benchmark_path, "perf.json"))
         if not perfs:
             raise ProgramError("benchmark didn't generate a valid perf measurement")
         if len(perfs) > 1:
             raise ProgramError("found more than one perf measurements")
 
-        results_dir = self._ensure_results_dir(workload, timestamp)
+        results_dir = self._ensure_results_dir(workload, env, timestamp)
         try:
             shutil.move(perfs[0], results_dir)
         except IOError as ex:

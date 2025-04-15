@@ -6,7 +6,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from pandas.errors import EmptyDataError
-from errors import ProgramError
+
+from utils import *
 
 
 class Reporter:
@@ -164,7 +165,7 @@ class Reporter:
                         row["Avg. Dram (J)"] -= tr_dram * scale
                 trial_row = {
                     "Mode": mode_str,
-                    "Language": "C",
+                    "Language": "trial-run",
                     "Avg. Time (ms)": tr_time,
                     "Avg. Pkg (J)": tr_pkg,
                     "Avg. Core (J)": tr_core,
@@ -243,7 +244,7 @@ class Reporter:
                             row[f"Avg. {ev}"] -= overhead
                 rows.append(row)
             if trial_data_exists:
-                trial_row = {"Mode": mode_str, "Language": "C", "Avg. Time (ms)": tr_time}
+                trial_row = {"Mode": mode_str, "Language": "trial-run", "Avg. Time (ms)": tr_time}
                 for ev in self.REQUESTED_EVENTS:
                     trial_row[f"Avg. {ev}"] = (
                         np.mean([float(e["counter-value"]) for e in trial_perf_data[ev]])

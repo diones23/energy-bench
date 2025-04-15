@@ -2,8 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 import os
 
-from errors import ProgramError
-from utils import write_file_sudo, read_file
+from utils import *
 
 class Cpu:
     def __init__(self, value: int) -> None:

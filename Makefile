@@ -1,3 +1,10 @@
+define install_items
+	@install -d -m 755 $(2)
+	@for file in $(wildcard $(1)); do \
+		install -m 644 $$file $(2); \
+	done
+endef
+
 NAME := energy-bench
 
 PREFIX := $(HOME)
@@ -24,20 +31,22 @@ install: $(RAPL_SO)
 	install -m 755 $(RAPL_SO) $(BASE_DIR)
 	install -m 644 $(RAPL_HEADER) $(BASE_DIR)
 	install -m 644 $(RAPL_JNI) $(BASE_DIR)
-	
-	# Install Python files
-	for file in $(wildcard *.py); do \
-		install -m 644 $$file $(BASE_DIR); \
-	done
 
-	# Install trial run
+	# Install main Python files using the unified helper
+	$(call install_items,*.py,$(BASE_DIR))
+
+	# Install files from the 'commands' and 'setups' directories
+	$(call install_items,commands/*,$(BASE_DIR)/commands)
+	$(call install_items,setups/*,$(BASE_DIR)/setups)
+
+	# Install trial run file
 	install -m 644 trial-run.yml $(BASE_DIR)
-	
+
 	# Create launcher script
-	echo '#!/bin/sh' > $(BIN_DIR)/$(NAME)
-	echo 'python3 $(BASE_DIR)/__main__.py "$$@"' >> $(BIN_DIR)/$(NAME)
-	chmod +x $(BIN_DIR)/$(NAME)
-	
+	@echo '#!/bin/sh' > $(BIN_DIR)/$(NAME)
+	@echo 'python3 $(BASE_DIR)/__main__.py "$$@"' >> $(BIN_DIR)/$(NAME)
+	@chmod +x $(BIN_DIR)/$(NAME)
+
 uninstall:
 	rm -rf $(BASE_DIR)
 	rm -f $(BIN_DIR)/$(NAME)

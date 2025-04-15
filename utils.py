@@ -3,7 +3,9 @@ from glob import glob
 import subprocess
 import os
 
-from errors import ProgramError
+
+class ProgramError(Exception):
+    pass
 
 
 def print_error(msg: str) -> None:
@@ -11,7 +13,7 @@ def print_error(msg: str) -> None:
 
 
 def print_success(msg: str) -> None:
-    print(f"\033[32m{msg}.\033[0m\n")
+    print(f"\033[32m{msg}\033[0m\n")
 
 
 def print_info(msg: str) -> None:
@@ -40,22 +42,29 @@ def format_time(timestamp: float) -> str:
 def elapsed_time(seconds: float) -> str:
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-
     return f"{int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}"
 
 
-def is_yaml_file(file_path: str) -> bool:
-    filename = os.path.basename(file_path)
+def filter_existing_yamls(yaml_paths: list[str]) -> list[str]:
+    existing_paths = []
+    for path in yaml_paths:
+        if os.path.exists(path) and is_yaml_file(path):
+            existing_paths.append(path)
+    return existing_paths
+
+
+def is_yaml_file(path: str) -> bool:
+    filename = os.path.basename(path)
     split = os.path.splitext(filename)
     if len(split) < 2:
         return False
-    ext = os.path.splitext(file_path)[1].lower()
+    ext = os.path.splitext(path)[1].lower()
     return ext in [".yaml", ".yml"]
 
 
-def write_file(data: str | bytes, file_path: str) -> None:
+def write_file(data: str | bytes, path: str) -> None:
     try:
-        with open(file_path, "wb") as file:
+        with open(path, "wb") as file:
             if isinstance(data, str):
                 file.write(data.encode())
             else:
@@ -64,13 +73,11 @@ def write_file(data: str | bytes, file_path: str) -> None:
         raise ProgramError(f"failed while writing to file - {ex}")
 
 
-def write_file_sudo(data: str | bytes, file_path: str) -> None:
+def write_file_sudo(data: str | bytes, path: str) -> None:
     if isinstance(data, str):
         data = data.encode()
     try:
-        subprocess.run(
-            ["sudo", "tee", file_path], input=data, check=True, stdout=subprocess.DEVNULL
-        )
+        subprocess.run(["sudo", "tee", path], input=data, check=True, stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError as ex:
         raise ProgramError(f"failed while writing to file - {ex}")
 
@@ -83,3 +90,8 @@ def read_file(path: str) -> str:
         raise ProgramError(f"file {path} doesn't exist")
     except OSError:
         raise ProgramError(f"could not read file {path}")
+
+
+def ensure_dir_exists(path: str) -> None:
+    if os.path.isdir(path) and not os.path.exists(path):
+        os.makedirs(path)

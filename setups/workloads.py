@@ -4,8 +4,7 @@ import signal
 import time
 import os
 
-
-from errors import ProgramError
+from utils import ProgramError
 
 
 class Workload:
