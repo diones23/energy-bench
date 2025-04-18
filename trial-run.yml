@@ -11,10 +11,8 @@ code: |
     #include <unistd.h>
     #include <rapl_interface.h>
 
-    int main()
-    {
-        while (start_rapl())
-        {
+    int main() {
+        while (start_rapl()) {
             sleep(10);
             stop_rapl();
         }
